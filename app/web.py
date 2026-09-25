@@ -3,13 +3,14 @@ from __future__ import annotations
 import csv
 import os
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from .config import settings
 from .db import ensure_signal_table, fetch_signal_rows, get_database_url
+from .auth import auth_api, authenticated_user
 
 
 def get_base_url() -> str:
@@ -20,6 +21,22 @@ DATA_DIR = BASE_DIR / "data"
 LOGS_DIR = BASE_DIR / "logs"
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY")
+if APP_ENV == "production" and (not AUTH_SECRET_KEY or len(AUTH_SECRET_KEY) < 32):
+    raise RuntimeError("A strong AUTH_SECRET_KEY must be configured in production")
+
+app.secret_key = AUTH_SECRET_KEY
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=(
+        APP_ENV == "production"
+        or os.getenv("SESSION_COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes", "on"}
+    ),
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+)
+app.register_blueprint(auth_api)
 
 
 @app.after_request
@@ -243,37 +260,44 @@ def build_evaluation_payload():
 
 
 @app.route("/")
+@authenticated_user
 def index():
     return render_template("index.html", base_url=get_base_url())
 
 
 @app.route("/api/status")
+@authenticated_user
 def api_status():
     return jsonify(build_status_payload())
 
 
 @app.route("/api/history")
+@authenticated_user
 def api_history():
     limit = max(1, min(500, int(request.args.get("limit", 200))))
     return jsonify(build_history_payload(limit=limit))
 
 
 @app.route("/api/components")
+@authenticated_user
 def api_components():
     return jsonify(build_components_payload())
 
 
 @app.route("/api/entries")
+@authenticated_user
 def api_entries():
     return jsonify(build_entries_payload())
 
 
 @app.route("/api/evaluation")
+@authenticated_user
 def api_evaluation():
     return jsonify(build_evaluation_payload())
 
 
 @app.route("/api/summary")
+@authenticated_user
 def api_summary():
     rows = load_signal_rows()
     summary = defaultdict(float)

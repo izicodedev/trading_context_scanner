@@ -37,9 +37,12 @@ Create a local `.env` file in the project root with the value:
 DATABASE_URL=postgresql://trading_context_scanner:CHANGE_ME@127.0.0.1:5432/trading_context_scanner
 WEB_BASE_URL=http://127.0.0.1:5000
 SIGNALS_CSV_PATH=data/signals.csv
+AUTH_SECRET_KEY=REPLACE_WITH_A_RANDOM_SECRET
+APP_ENV=production
 ```
 
 Do not commit `.env` to the repository.
+Generate `AUTH_SECRET_KEY` on the VPS with `python -c "import secrets; print(secrets.token_urlsafe(48))"` and store it only in `.env`.
 
 ## 5. Schema initialization and idempotence
 
@@ -88,3 +91,32 @@ python -c "import os, psycopg; conn = psycopg.connect(os.environ['DATABASE_URL']
 - The legacy CSV remains a fallback only when `DATABASE_URL` is unset.
 - No historical CSV migration is required for production startup.
 - The application must not use the `postgres` user directly for runtime access.
+
+## User authentication foundation
+
+The versioned user migration creates `users`, `user_coins`, and `strategies`; it does not modify the global `signals` table.
+
+After setting `DATABASE_URL` and `AUTH_SECRET_KEY` in `.env`, apply the migration:
+
+```bash
+cd /opt/trading_context_scanner
+set -a
+. ./.env
+set +a
+. .venv/bin/activate
+python -m app.user_migrations migrate
+```
+
+Seed the first MASTER account without putting the password in a file or command history:
+
+```bash
+read -rsp "Master password: " MASTER_PASSWORD
+export MASTER_PASSWORD
+echo
+python -m app.user_migrations seed-master
+unset MASTER_PASSWORD
+```
+
+The seed defaults to login/name `izicode`, requires at least 12 password characters, and stores only a Werkzeug `scrypt` password hash. Re-running the seed updates the same account's hash and MASTER role; it never prints the password or hash.
+
+Authentication uses a signed Flask session cookie (`HttpOnly`, `SameSite=Lax`, eight-hour lifetime). In production, `AUTH_SECRET_KEY` must be at least 32 characters and the `Secure` cookie flag is always enabled. The analysis endpoints require a valid session but return the same global signals to every authenticated user; no analysis query is scoped by user.

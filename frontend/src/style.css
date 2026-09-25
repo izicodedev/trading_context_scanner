@@ -90,6 +90,27 @@ h1, h2, h3, p {
  font-size: 0.78rem;
 }
 
+.logout-button {
+ align-self: flex-end;
+ border: 1px solid var(--border);
+ border-radius: 8px;
+ padding: 6px 10px;
+ color: var(--muted);
+ background: rgba(148, 163, 184, 0.06);
+ cursor: pointer;
+ font-size: 0.76rem;
+}
+
+.logout-button:hover {
+ color: var(--text);
+ border-color: rgba(148, 163, 184, 0.4);
+}
+
+.auth-error {
+ color: #fca5a5;
+ font-size: 0.74rem;
+}
+
 .content {
  display: flex;
  flex-direction: column;

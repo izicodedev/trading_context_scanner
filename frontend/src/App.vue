@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { getComponents, getEntries, getEvaluation, getHistory, getStatus } from './services/api'
+import { getAuthSession, getComponents, getEntries, getEvaluation, getHistory, getStatus, signOut } from './services/api'
 import type { ComponentSummary, EvaluationRow, SignalRow, StatusPayload } from './types/api'
+import LoginView from './views/LoginView.vue'
+
+const isLoginRoute = ref(window.location.pathname.replace(/\/+$/, '') === '/login')
+const isAuthenticated = ref(false)
+const authReady = ref(false)
+const authError = ref('')
 
 const status = ref<StatusPayload | null>(null)
 const history = ref<SignalRow[]>([])
@@ -193,23 +199,88 @@ const loadData = async () => {
 
 let intervalId: number | undefined
 
-onMounted(() => {
+const navigateTo = (path: string, replace = false) => {
+  if (replace) {
+    window.history.replaceState({}, '', path)
+  } else {
+    window.history.pushState({}, '', path)
+  }
+  isLoginRoute.value = path === '/login'
+}
+
+const startDashboardPolling = () => {
+  if (intervalId) return
   void loadData()
   intervalId = window.setInterval(() => {
     void loadData()
   }, 15000)
+}
+
+const handleAuthenticated = () => {
+  isAuthenticated.value = true
+  authError.value = ''
+  navigateTo('/')
+  startDashboardPolling()
+}
+
+const handleLogout = async () => {
+  try {
+    await signOut()
+    isAuthenticated.value = false
+    authError.value = ''
+    if (intervalId) {
+      window.clearInterval(intervalId)
+      intervalId = undefined
+    }
+    navigateTo('/login')
+  } catch (error) {
+    console.error('Erro ao encerrar sessão', error)
+    authError.value = 'Não foi possível encerrar a sessão. Tente novamente.'
+  }
+}
+
+const synchronizeRoute = () => {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/'
+  isLoginRoute.value = path === '/login'
+  if (!isAuthenticated.value && !isLoginRoute.value) {
+    navigateTo('/login', true)
+  } else if (isAuthenticated.value && isLoginRoute.value) {
+    navigateTo('/', true)
+  }
+}
+
+onMounted(async () => {
+  window.addEventListener('popstate', synchronizeRoute)
+  try {
+    const auth = await getAuthSession()
+    isAuthenticated.value = auth.authenticated
+    if (!auth.authenticated && !isLoginRoute.value) {
+      navigateTo('/login', true)
+    } else if (auth.authenticated && isLoginRoute.value) {
+      navigateTo('/', true)
+    }
+    if (auth.authenticated) startDashboardPolling()
+  } catch (error) {
+    console.error('Não foi possível validar a sessão', error)
+    if (!isLoginRoute.value) navigateTo('/login', true)
+  } finally {
+    authReady.value = true
+  }
 })
 
 onBeforeUnmount(() => {
   if (intervalId) window.clearInterval(intervalId)
+  window.removeEventListener('popstate', synchronizeRoute)
 })
 </script>
 
 <template>
-  <div class="app-shell">
+  <LoginView v-if="authReady && !isAuthenticated" @authenticated="handleAuthenticated" />
+
+  <div v-else-if="authReady && isAuthenticated" class="app-shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">Trading Context Scanner</p>
+        <p class="eyebrow">IziCrypto</p>
         <h1>Dashboard</h1>
       </div>
       <div class="status-wrap">
@@ -221,6 +292,8 @@ onBeforeUnmount(() => {
           <span>{{ status?.timeframe || 'N/D' }}</span>
           <span>Threshold: {{ status?.threshold ?? 'N/D' }}</span>
         </div>
+        <button class="logout-button" type="button" @click="handleLogout">Encerrar sessão</button>
+        <span v-if="authError" class="auth-error" role="alert">{{ authError }}</span>
       </div>
     </header>
 
@@ -335,7 +408,7 @@ onBeforeUnmount(() => {
       <section class="panel component-panel">
         <div class="section-head">
           <h2>Configuração local</h2>
-          <span class="small-note">A configuração é local no frontend e não altera a estratégia do backend.</span>
+          <span class="small-note">A configuração é local neste navegador e não altera a estratégia do backend.</span>
         </div>
 
         <div class="component-layout">
@@ -492,7 +565,7 @@ onBeforeUnmount(() => {
         </ul>
       </section>
     </main>
-
-    <div v-else class="loading-state">Carregando dados do scanner...</div>
   </div>
+
+  <div v-else class="loading-state">Verificando sessão...</div>
 </template>

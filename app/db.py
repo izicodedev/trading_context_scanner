@@ -34,6 +34,80 @@ def get_database_url() -> str | None:
     return os.getenv("DATABASE_URL")
 
 
+def get_user_by_login(login: str) -> dict[str, Any] | None:
+    database_url = get_database_url()
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+    import psycopg
+
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, name, login, password_hash, active, role
+                FROM users
+                WHERE login = %s
+                """,
+                (login,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            columns = [description[0] for description in cur.description]
+            return dict(zip(columns, row))
+
+
+def get_active_user_by_id(user_id: int) -> dict[str, Any] | None:
+    database_url = get_database_url()
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+    import psycopg
+
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, name, login, role
+                FROM users
+                WHERE id = %s AND active = TRUE
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            columns = [description[0] for description in cur.description]
+            return dict(zip(columns, row))
+
+
+def seed_master_user(login: str, name: str, password_hash: str) -> dict[str, Any]:
+    database_url = get_database_url()
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not configured")
+    import psycopg
+
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (name, login, password_hash, active, role)
+                VALUES (%s, %s, %s, TRUE, 'MASTER')
+                ON CONFLICT (login) DO UPDATE
+                SET name = EXCLUDED.name,
+                    password_hash = EXCLUDED.password_hash,
+                    active = TRUE,
+                    role = 'MASTER',
+                    updated_at = NOW()
+                RETURNING id, name, login, active, role
+                """,
+                (name, login, password_hash),
+            )
+            row = cur.fetchone()
+            columns = [description[0] for description in cur.description]
+            result = dict(zip(columns, row))
+    return result
+
+
 def fetch_signal_rows(limit: int | None = None, database_url: str | None = None) -> list[dict[str, Any]]:
     url = database_url or get_database_url()
     if not url:
