@@ -6,12 +6,9 @@ import type {
   SummaryPayload,
 } from '../types/api';
 
-const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:5000').replace(/\/$/, '');
 
 function resolveUrl(path: string): string {
-  if (!API_BASE) {
-    return path;
-  }
   return `${API_BASE}${path}`;
 }
 
