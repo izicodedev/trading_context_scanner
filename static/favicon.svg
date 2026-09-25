@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Trading Context Scanner favicon">
+  <rect width="64" height="64" rx="14" fill="#0b1220"/>
+  <path d="M14 42 L22 32 L30 36 L42 20 L50 26" fill="none" stroke="#60a5fa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M14 20 L22 28 L30 24 L42 40 L50 34" fill="none" stroke="#ef4444" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
+</svg>

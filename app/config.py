@@ -1,4 +1,6 @@
+import os
 from dataclasses import dataclass
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -13,5 +15,8 @@ class Settings:
     atr_stop_mult: float = 1.2
     api_base: str = "https://api.binance.com"
     data_file: str = "data/signals.csv"
+    evaluation_file: str = "data/signal_evaluation.csv"
+    web_base_url: str = os.getenv("WEB_BASE_URL", "http://localhost:5000")
+
 
 settings = Settings()

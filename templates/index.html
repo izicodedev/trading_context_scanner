@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Dashboard de monitoramento do scanner de contexto de trading BTC/USDT." />
+    <title>Trading Context Scanner</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href="{{ base_url }}/" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Trading Context Scanner</p>
+          <h1>Dashboard</h1>
+        </div>
+        <div class="status-wrap">
+          <span id="statusBadge" class="status-badge offline">OFFLINE</span>
+          <div class="header-meta">
+            <span id="marketValue">N/D</span>
+            <span id="timeframeValue">N/D</span>
+            <span id="thresholdValue">Threshold: N/D</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="cards-grid" aria-label="Resumo do scanner">
+          <article class="metric-card panel">
+            <p class="label">Preço atual</p>
+            <h2 id="priceValue">N/D</h2>
+            <small id="lastUpdateValue">Última atualização: N/D</small>
+          </article>
+          <article class="metric-card panel">
+            <p class="label">LONG score</p>
+            <h2 id="longScoreValue">N/D</h2>
+            <small id="longScoreMeta">/ 65</small>
+          </article>
+          <article class="metric-card panel">
+            <p class="label">SHORT score</p>
+            <h2 id="shortScoreValue">N/D</h2>
+            <small id="shortScoreMeta">/ 65</small>
+          </article>
+          <article class="metric-card panel">
+            <p class="label">Estado atual</p>
+            <h2 id="stateValue">N/D</h2>
+            <small id="stateMeta">N/D</small>
+          </article>
+          <article class="metric-card panel">
+            <p class="label">ATR</p>
+            <h2 id="atrValue">N/D</h2>
+            <small id="atrMeta">Indicador</small>
+          </article>
+          <article class="metric-card panel">
+            <p class="label">RSI</p>
+            <h2 id="rsiValue">N/D</h2>
+            <small id="rsiMeta">Indicador</small>
+          </article>
+          <article class="metric-card panel">
+            <p class="label">Volume ratio</p>
+            <h2 id="volRatioValue">N/D</h2>
+            <small id="volRatioMeta">Indicador</small>
+          </article>
+          <article class="metric-card panel">
+            <p class="label">Tendência</p>
+            <h2 id="trendValue">N/D</h2>
+            <small id="trendMeta">Bias</small>
+          </article>
+        </section>
+
+        <section class="score-panel panel">
+          <div class="section-head">
+            <h2>Score</h2>
+          </div>
+          <div class="score-row">
+            <div class="score-label-group">
+              <span>LONG</span>
+              <strong id="longBarLabel">0/65</strong>
+            </div>
+            <div class="bar-track">
+              <div id="longBar" class="bar long"></div>
+            </div>
+          </div>
+          <div class="score-row">
+            <div class="score-label-group">
+              <span>SHORT</span>
+              <strong id="shortBarLabel">0/65</strong>
+            </div>
+            <div class="bar-track">
+              <div id="shortBar" class="bar short"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel component-panel">
+          <div class="section-head">
+            <h2>Componentes do score</h2>
+          </div>
+          <div class="component-layout">
+            <div>
+              <h3>LONG</h3>
+              <ul id="longComponents" class="component-list"></ul>
+            </div>
+            <div>
+              <h3>SHORT</h3>
+              <ul id="shortComponents" class="component-list"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel chart-panel">
+          <div class="section-head">
+            <h2>Gráficos</h2>
+          </div>
+          <div class="chart-grid">
+            <div class="chart-box">
+              <h3>Preço</h3>
+              <svg id="priceChart" viewBox="0 0 480 180" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="chart-box">
+              <h3>LONG / SHORT</h3>
+              <svg id="scoreChart" viewBox="0 0 480 180" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="chart-box">
+              <h3>RSI</h3>
+              <svg id="rsiChart" viewBox="0 0 480 180" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="chart-box">
+              <h3>Volume ratio</h3>
+              <svg id="volChart" viewBox="0 0 480 180" preserveAspectRatio="none"></svg>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel table-panel">
+          <div class="section-head">
+            <h2>Histórico</h2>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Preço</th>
+                  <th>LONG</th>
+                  <th>SHORT</th>
+                  <th>Direção</th>
+                  <th>Signal</th>
+                  <th>Setup</th>
+                  <th>Entry</th>
+                  <th>RSI</th>
+                  <th>ATR</th>
+                  <th>Vol</th>
+                  <th>Trend</th>
+                </tr>
+              </thead>
+              <tbody id="historyTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel two-col">
+          <div>
+            <div class="section-head">
+              <h2>Entradas</h2>
+            </div>
+            <div id="entriesSummary">Nenhuma ENTRY registrada.</div>
+          </div>
+          <div>
+            <div class="section-head">
+              <h2>Avaliação</h2>
+            </div>
+            <div id="evaluationSummary">N/D</div>
+          </div>
+        </section>
+
+        <section class="panel status-panel">
+          <div class="section-head">
+            <h2>Status do scanner</h2>
+          </div>
+          <ul id="statusList" class="status-list"></ul>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
