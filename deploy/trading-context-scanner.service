@@ -1,0 +1,20 @@
+[Unit]
+Description=Trading Context Scanner
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=trading_context_scanner
+Group=trading_context_scanner
+WorkingDirectory=/opt/trading_context_scanner
+EnvironmentFile=/opt/trading_context_scanner/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/trading_context_scanner/.venv/bin/python -m app.main
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
