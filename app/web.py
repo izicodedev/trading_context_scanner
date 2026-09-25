@@ -9,6 +9,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 from .config import settings
+from .db import ensure_signal_table, fetch_signal_rows, get_database_url
 
 
 def get_base_url() -> str:
@@ -70,6 +71,17 @@ def _read_csv(path: str | Path):
         return list(reader)
 
 
+def _read_postgres_rows(limit: int | None = None):
+    if not get_database_url():
+        return []
+    rows = fetch_signal_rows(limit=limit)
+    for row in rows:
+        value = row.get("timestamp")
+        if hasattr(value, "isoformat"):
+            row["timestamp"] = value.isoformat()
+    return rows
+
+
 def _metric_or_none(value):
     if value in (None, "", "-"):
         return None
@@ -80,7 +92,11 @@ def _metric_or_none(value):
 
 
 def load_signal_rows():
-    rows = _read_csv(DATA_DIR / "signals.csv")
+    if get_database_url():
+        rows = _read_postgres_rows()
+    else:
+        rows = _read_csv(DATA_DIR / "signals.csv")
+
     for row in rows:
         row["timestamp_dt"] = parse_timestamp(row.get("timestamp"))
         row["score_int"] = int(row.get("score", 0) or 0)
@@ -98,6 +114,9 @@ def load_signal_rows():
         row["signal_state"] = row.get("signal_state", "SIGNAL")
         row["setup_state"] = row.get("setup_state", "UNSET")
         row["entry_state"] = row.get("entry_state", "UNSET")
+
+    if get_database_url():
+        rows = sorted(rows, key=lambda row: row.get("timestamp_dt") or datetime.min.replace(tzinfo=timezone.utc))
     return rows
 
 

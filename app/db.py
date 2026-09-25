@@ -34,6 +34,40 @@ def get_database_url() -> str | None:
     return os.getenv("DATABASE_URL")
 
 
+def fetch_signal_rows(limit: int | None = None, database_url: str | None = None) -> list[dict[str, Any]]:
+    url = database_url or get_database_url()
+    if not url:
+        return []
+    try:
+        import psycopg
+    except ImportError:
+        return []
+
+    conn = psycopg.connect(url)
+    try:
+        ensure_signal_table(conn)
+        sql = "SELECT * FROM signals ORDER BY timestamp DESC"
+        params: list[Any] = []
+        if limit is not None:
+            sql = "SELECT * FROM signals ORDER BY timestamp DESC LIMIT %s"
+            params = [limit]
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            columns = [desc[0] for desc in cur.description]
+            rows = [dict(zip(columns, row)) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        normalized_row = dict(row)
+        ts_value = normalized_row.get("timestamp")
+        if hasattr(ts_value, "isoformat"):
+            normalized_row["timestamp"] = ts_value.isoformat()
+        normalized.append(normalized_row)
+    return normalized
+
+
 def parse_timestamp(value: str | None):
     if value in (None, "", "-"):
         return None
