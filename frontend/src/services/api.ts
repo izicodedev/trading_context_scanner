@@ -21,25 +21,25 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export function getStatus(): Promise<StatusPayload> {
-  return getJson<StatusPayload>('/api/status');
+  return getJson<StatusPayload>('/status');
 }
 
 export function getHistory(limit = 200): Promise<SignalRow[]> {
-  return getJson<SignalRow[]>(`/api/history?limit=${limit}`);
+  return getJson<SignalRow[]>(`/history?limit=${limit}`);
 }
 
 export function getComponents(): Promise<ComponentSummary[]> {
-  return getJson<ComponentSummary[]>('/api/components');
+  return getJson<ComponentSummary[]>('/components');
 }
 
 export function getEntries(): Promise<SignalRow[]> {
-  return getJson<SignalRow[]>('/api/entries');
+  return getJson<SignalRow[]>('/entries');
 }
 
 export function getEvaluation(): Promise<EvaluationRow[]> {
-  return getJson<EvaluationRow[]>('/api/evaluation');
+  return getJson<EvaluationRow[]>('/evaluation');
 }
 
 export function getSummary(): Promise<SummaryPayload> {
-  return getJson<SummaryPayload>('/api/summary');
+  return getJson<SummaryPayload>('/summary');
 }
