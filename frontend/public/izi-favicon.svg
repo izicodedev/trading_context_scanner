@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101B2D"/>
+      <stop offset="1" stop-color="#050A12"/>
+    </linearGradient>
+    <linearGradient id="z" x1="22" y1="18" x2="42" y2="46" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19F5D0"/>
+      <stop offset="1" stop-color="#168CFF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- favicon background -->
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#bg)"/>
+  <rect x="2.75" y="2.75" width="58.5" height="58.5" rx="14.25"
+        stroke="#17314C" stroke-width="1.5"/>
+
+  <!-- IZI: deliberately bold and readable at small sizes -->
+  <g font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="900"
+     letter-spacing="-3">
+    <text x="8" y="43" fill="#F4F8FF">I</text>
+    <text x="20" y="43" fill="url(#z)">Z</text>
+    <text x="39" y="43" fill="#F4F8FF">I</text>
+  </g>
+
+  <!-- subtle market signal -->
+  <path d="M10 50 L20 50 L26 45 L33 48 L43 39 L54 39"
+        fill="none" stroke="#19F5D0" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" opacity=".8"/>
+</svg>

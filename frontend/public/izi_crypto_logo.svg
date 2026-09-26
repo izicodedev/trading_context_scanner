@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="neon" x1="80" y1="430" x2="430" y2="80" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1473FF"/>
+      <stop offset="0.5" stop-color="#00D9FF"/>
+      <stop offset="1" stop-color="#20FFD0"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="160" y1="120" x2="350" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4FAFF"/>
+      <stop offset="0.35" stop-color="#9CB4CF"/>
+      <stop offset="0.7" stop-color="#356B9F"/>
+      <stop offset="1" stop-color="#00D9FF"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.5"/>
+    </filter>
+  </defs>
+
+  <!-- subtle HUD ring -->
+  <circle cx="256" cy="256" r="202" stroke="#1262B8" stroke-opacity=".22" stroke-width="1"/>
+  <circle cx="256" cy="256" r="184" stroke="#00D9FF" stroke-opacity=".18" stroke-width="2"
+          stroke-dasharray="44 16 8 20"/>
+
+  <!-- orbital tech sweep -->
+  <path d="M72 316 C132 416 342 430 446 254"
+        stroke="url(#neon)" stroke-width="13" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M71 315 C129 409 331 426 445 255"
+        stroke="#B8FFFF" stroke-opacity=".65" stroke-width="2"/>
+
+  <!-- IZI monogram -->
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="900" font-style="italic"
+     text-anchor="middle">
+    <text x="256" y="330" font-size="218" letter-spacing="-22" fill="url(#metal)"
+          stroke="#06182B" stroke-width="5" paint-order="stroke">IZI</text>
+  </g>
+
+  <!-- rising candlesticks integrated with the mark -->
+  <g stroke="url(#neon)" stroke-width="5" filter="url(#glow)">
+    <path d="M319 257V210 M319 280V294"/>
+    <path d="M348 235V178 M348 263V278"/>
+    <path d="M377 208V145 M377 238V254"/>
+    <path d="M406 180V113 M406 212V229"/>
+  </g>
+  <g fill="url(#neon)">
+    <rect x="310" y="238" width="18" height="26" rx="3"/>
+    <rect x="339" y="207" width="18" height="36" rx="3"/>
+    <rect x="368" y="178" width="18" height="50" rx="3"/>
+    <rect x="397" y="148" width="18" height="56" rx="3"/>
+  </g>
+
+  <!-- upward signal arrow -->
+  <path d="M294 207 L410 92" stroke="url(#neon)" stroke-width="7"
+        stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M410 92 L386 99 M410 92 L402 116"
+        stroke="#20FFD0" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- small circuit accents -->
+  <g fill="#00D9FF">
+    <circle cx="91" cy="190" r="3"/>
+    <circle cx="111" cy="161" r="2.5"/>
+    <circle cx="421" cy="333" r="3"/>
+    <circle cx="442" cy="307" r="2.5"/>
+  </g>
+  <g stroke="#00D9FF" stroke-opacity=".35" stroke-width="2">
+    <path d="M91 190h24l12-12"/>
+    <path d="M421 333h-23l-12 12"/>
+  </g>
+</svg>

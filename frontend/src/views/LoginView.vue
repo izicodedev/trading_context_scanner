@@ -5,6 +5,7 @@ import { signIn } from '../services/api'
 const emit = defineEmits<{ authenticated: [] }>()
 const login = ref('')
 const password = ref('')
+const showPassword = ref(false)
 const isSubmitting = ref(false)
 const errorMessage = ref('')
 
@@ -80,15 +81,33 @@ const submitLogin = async () => {
             <label for="login-password">Senha</label>
             <button class="text-link" type="button">Esqueci minha senha</button>
           </div>
-          <input
-            id="login-password"
-            v-model="password"
-            type="password"
-            name="password"
-            autocomplete="current-password"
-            required
-            placeholder="Sua senha"
-          />
+          <div class="password-input-wrap">
+            <input
+              id="login-password"
+              v-model="password"
+              :type="showPassword ? 'text' : 'password'"
+              name="password"
+              autocomplete="current-password"
+              required
+              placeholder="Sua senha"
+            />
+            <button
+              class="password-visibility"
+              type="button"
+              :aria-label="showPassword ? 'Ocultar senha' : 'Mostrar senha'"
+              :aria-pressed="showPassword"
+              @click="showPassword = !showPassword"
+            >
+              <svg v-if="showPassword" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8" />
+                <path d="M9.9 5.2A10.8 10.8 0 0112 5c5.2 0 9 4.4 10 7-.4 1.1-1.4 2.6-2.9 3.9M6.2 6.2C3.9 7.6 2.5 9.7 2 12c1 2.6 4.8 7 10 7 1.2 0 2.3-.2 3.3-.7" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
 
           <button class="login-submit" type="submit" :disabled="isSubmitting">
             {{ isSubmitting ? 'Entrando...' : 'Entrar' }}
@@ -290,6 +309,47 @@ const submitLogin = async () => {
   background: rgba(4, 12, 22, 0.48);
   font-size: 0.88rem;
   transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.password-input-wrap {
+  position: relative;
+}
+
+.password-input-wrap input {
+  padding-right: 48px;
+}
+
+.password-visibility {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 7px;
+  color: var(--login-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.password-visibility:hover,
+.password-visibility:focus-visible {
+  color: var(--login-text);
+  outline: 2px solid rgba(104, 170, 250, 0.6);
+  outline-offset: 1px;
+}
+
+.password-visibility svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
 }
 
 .login-form input::placeholder {
