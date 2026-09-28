@@ -1,7 +1,7 @@
 [Unit]
-Description=Trading Context Scanner Flask API
+Description=Trading Context Hyperliquid Executor
 After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -10,16 +10,14 @@ Group=trading_context_scanner
 WorkingDirectory=/opt/trading_context_scanner
 EnvironmentFile=/opt/trading_context_scanner/.env
 Environment=PYTHONUNBUFFERED=1
-Environment=APP_ENV=production
-Environment=TRUST_LOCAL_PROXY=true
 Environment=HYPERLIQUID_ENABLE_MAINNET=false
-ExecStart=/opt/trading_context_scanner/.venv/bin/gunicorn --bind 127.0.0.1:5000 --workers 2 --threads 4 --timeout 120 app.web:app
+Environment=HYPERLIQUID_ENABLE_TESTNET=false
+ExecStart=/opt/trading_context_scanner/.venv/bin/python -m app.execution_service
 Restart=always
-RestartSec=30
+RestartSec=10
+TimeoutStopSec=30
 UMask=0077
 NoNewPrivileges=true
-StandardOutput=journal
-StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

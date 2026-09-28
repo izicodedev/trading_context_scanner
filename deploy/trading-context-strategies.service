@@ -1,0 +1,16 @@
+[Unit]
+Description=Trading Context Strategy Simulation Worker
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=trading_context_scanner
+Group=trading_context_scanner
+WorkingDirectory=/opt/trading_context_scanner
+EnvironmentFile=/opt/trading_context_scanner/.env
+ExecStart=/opt/trading_context_scanner/.venv/bin/python -m app.strategy_worker
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

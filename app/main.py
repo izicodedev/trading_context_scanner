@@ -5,6 +5,8 @@ from .evaluation import evaluate_signal
 from .market import BinanceClient
 from .strategy import analyze
 from .storage import save, save_evaluation
+from .candle_storage import save_candles
+from .db import get_database_url
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", handlers=[logging.FileHandler("logs/scanner.log"), logging.StreamHandler()])
 
@@ -18,6 +20,14 @@ async def scan(client):
     save(sig, settings.data_file)
     eval_record = evaluate_signal(sig, trigger)
     save_evaluation(eval_record, settings.evaluation_file)
+    if get_database_url():
+        try:
+            for interval, candles in ((settings.context_interval, context),
+                                      (settings.structure_interval, structure),
+                                      (settings.trigger_interval, trigger)):
+                save_candles(settings.symbol, interval, candles)
+        except Exception:
+            logging.exception("Candle persistence failed; scanner signal was preserved")
     prefix = "[WAIT SIGNAL]" if sig.side == "WAIT" else f"[{sig.side} SIGNAL]"
     if sig.entry_state == "ENTRY":
         prefix = f"[{sig.side} ENTRY]"

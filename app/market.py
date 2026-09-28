@@ -15,10 +15,15 @@ class BinanceClient:
         if self.session:
             await self.session.close()
 
-    async def klines(self, symbol: str, interval: str, limit: int = 300) -> pd.DataFrame:
+    async def klines(self, symbol: str, interval: str, limit: int = 300,
+                     start_time: int | None = None, end_time: int | None = None) -> pd.DataFrame:
         assert self.session is not None
         url = f"{self.base_url}/api/v3/klines"
         params = {"symbol": symbol, "interval": interval, "limit": limit}
+        if start_time is not None:
+            params["startTime"] = start_time
+        if end_time is not None:
+            params["endTime"] = end_time
         async with self.session.get(url, params=params) as r:
             r.raise_for_status()
             rows = await r.json()

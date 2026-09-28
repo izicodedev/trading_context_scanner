@@ -4,8 +4,13 @@ import { getAuthSession, getComponents, getEntries, getEvaluation, getHistory, g
 import type { ComponentSummary, EvaluationRow, SignalRow, StatusPayload } from './types/api'
 import InfoPopover from './components/InfoPopover.vue'
 import LoginView from './views/LoginView.vue'
+import SimulatorView from './views/SimulatorView.vue'
+import HyperliquidView from './views/HyperliquidView.vue'
 
 const isLoginRoute = ref(window.location.pathname.replace(/\/+$/, '') === '/login')
+const isSimulatorRoute = ref(window.location.pathname.replace(/\/+$/, '') === '/simulator')
+const isHyperliquidRoute = ref(window.location.pathname.replace(/\/+$/, '') === '/hyperliquid')
+const returnPath = ref(isHyperliquidRoute.value ? '/hyperliquid' : isSimulatorRoute.value ? '/simulator' : '/')
 const isAuthenticated = ref(false)
 const authReady = ref(false)
 const authError = ref('')
@@ -20,7 +25,6 @@ const scoreThreshold = computed(() => toNumber(status.value?.threshold) ?? 65)
 const visibleCount = ref(5)
 const historyExpanded = ref(false)
 const historyFilter = ref<'ALL' | 'LONG' | 'SHORT' | 'WAIT'>('ALL')
-const lastAlertKey = ref<string | null>(null)
 const STORAGE_KEY = 'scanner-component-config-v1'
 const componentConfig = ref<Record<string, boolean>>({})
 
@@ -192,12 +196,6 @@ const alertEntry = computed(() => {
   if (!latestEntry) return null
 
   const direction = getSignalSide(latestEntry)
-  const key = `${latestEntry.timestamp ?? latestEntry.timestamp_dt ?? 'na'}-${direction}`
-
-  if (lastAlertKey.value === key) return null
-
-  lastAlertKey.value = key
-
   return {
     direction,
     price: latestEntry.price_float ?? latestEntry.price ?? 'N/D',
@@ -250,6 +248,8 @@ const navigateTo = (path: string, replace = false) => {
     window.history.pushState({}, '', path)
   }
   isLoginRoute.value = path === '/login'
+  isSimulatorRoute.value = path === '/simulator'
+  isHyperliquidRoute.value = path === '/hyperliquid'
 }
 
 const startDashboardPolling = () => {
@@ -263,7 +263,7 @@ const startDashboardPolling = () => {
 const handleAuthenticated = () => {
   isAuthenticated.value = true
   authError.value = ''
-  navigateTo('/')
+  navigateTo(returnPath.value)
   startDashboardPolling()
 }
 
@@ -286,6 +286,8 @@ const handleLogout = async () => {
 const synchronizeRoute = () => {
   const path = window.location.pathname.replace(/\/+$/, '') || '/'
   isLoginRoute.value = path === '/login'
+  isSimulatorRoute.value = path === '/simulator'
+  isHyperliquidRoute.value = path === '/hyperliquid'
   if (!isAuthenticated.value && !isLoginRoute.value) {
     navigateTo('/login', true)
   } else if (isAuthenticated.value && isLoginRoute.value) {
@@ -325,13 +327,18 @@ onBeforeUnmount(() => {
     <header class="topbar">
       <div>
         <p class="eyebrow">IziCrypto</p>
-        <h1>Análise de mercado</h1>
+        <h1>{{ isHyperliquidRoute ? 'Hyperliquid' : isSimulatorRoute ? 'Simulador de operações' : 'Análise de mercado' }}</h1>
+        <nav class="main-nav" aria-label="Navegação principal">
+          <a href="/" :aria-current="!isSimulatorRoute && !isHyperliquidRoute ? 'page' : undefined">Scanner</a>
+          <a href="/simulator" :aria-current="isSimulatorRoute ? 'page' : undefined">Simulador</a>
+          <a href="/hyperliquid" :aria-current="isHyperliquidRoute ? 'page' : undefined">Hyperliquid</a>
+        </nav>
       </div>
       <div class="status-wrap">
-        <span class="status-badge" :class="status?.scanner_status === 'ONLINE' ? 'online' : 'offline'">
+        <span v-if="!isSimulatorRoute && !isHyperliquidRoute" class="status-badge" :class="status?.scanner_status === 'ONLINE' ? 'online' : 'offline'">
           {{ status?.scanner_status || 'OFFLINE' }}
         </span>
-        <div class="header-meta">
+        <div v-if="!isSimulatorRoute && !isHyperliquidRoute" class="header-meta">
           <span>{{ status?.market || 'N/D' }}</span>
           <span>Atualizado {{ formatDate(status?.last_update) }}</span>
         </div>
@@ -340,7 +347,9 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <main v-if="!isLoading" class="content">
+    <HyperliquidView v-if="isHyperliquidRoute" />
+    <SimulatorView v-else-if="isSimulatorRoute" />
+    <main v-else-if="!isLoading" class="content">
       <section class="market-overview panel" aria-label="Contexto atual do mercado">
         <div class="market-overview__price">
           <div class="section-kicker">Ativo analisado</div>

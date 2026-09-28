@@ -25,7 +25,8 @@ function resolveUrl(path: string): string {
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(resolveUrl(path), { credentials: 'same-origin' });
   if (!response.ok) {
-    throw new Error(`Request failed: ${path} (${response.status})`);
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(payload?.error ?? `Não foi possível consultar o serviço (${response.status}).`);
   }
   return response.json() as Promise<T>;
 }
@@ -79,3 +80,97 @@ export function getEvaluation(): Promise<EvaluationRow[]> {
 export function getSummary(): Promise<SummaryPayload> {
   return getJson<SummaryPayload>('/summary');
 }
+
+export interface SimulationResult {
+  data_source: 'database' | 'manual';
+  candles_loaded: number;
+  status: 'TARGET' | 'STOP' | 'AMBIGUOUS' | 'TIMEOUT' | 'INSUFFICIENT_DATA';
+  entry_price: number;
+  exit_price: number | null;
+  entry_time: string;
+  exit_time: string | null;
+  price_return_pct: number | null;
+  duration_seconds: number | null;
+  candles_held: number;
+  ambiguous: boolean;
+  ambiguity_policy: string;
+  exit_time_basis: string | null;
+}
+
+export function simulateTrade(payload: unknown): Promise<SimulationResult> {
+  return postJson<SimulationResult>('/simulator', payload);
+}
+
+export interface CandleDataset {
+  source: string;
+  symbol: string;
+  timeframe: string;
+  candles: number;
+  start_time: string;
+  end_time: string;
+  first_open: number;
+}
+
+export function getCandleDatasets(): Promise<CandleDataset[]> {
+  return getJson<CandleDataset[]>('/simulator/datasets');
+}
+
+export interface LabStrategy {
+  key: string; name: string; description: string; leverage: number;
+  stop_floor: number; atr_multiple: number; reward_risk: number; max_candles: number; threshold?: number;
+}
+export interface LabTrade {
+  side: string; entry_time: string; entry_price: number; stop_price: number;
+  target_price: number; margin: number; quantity: number; candles_held: number;
+  exit_time?: string; exit_price?: number; net_pnl?: number; estimated_net_pnl?: number;
+  status?: string; ambiguous?: boolean;
+}
+export interface LabMetrics {
+  strategy: LabStrategy; closed_trades: number; wins: number; losses: number;
+  win_rate: number | null; net_pnl: number; equity: number; balance: number;
+  total_return_pct: number; expectancy: number | null; profit_factor: number | null;
+  max_drawdown_pct: number; max_consecutive_losses: number;
+  fees: number; funding: number; slippage: number;
+  daily: { day: string; return_pct: number | null; partial: boolean }[];
+  open_position: LabTrade | null; recent_trades: LabTrade[];
+  curve: { time: string; equity: number }[];
+}
+export interface LabStatus {
+  active: boolean; started_at?: string; stopped_at?: string; heartbeat?: string;
+  processed_through?: string; history_start?: string; history_end?: string; last_error?: string;
+  strategies: LabStrategy[];
+  configuration: { initial_equity: number; margin_fraction: number; fee_rate: number;
+    slippage_rate: number; hourly_funding_rate: number; maintenance_margin_rate: number; daily_goal_pct: number };
+  snapshot: { historical: LabMetrics[]; live: LabMetrics[]; source: string;
+    symbol: string; timeframe: string; history_candles: number;
+    research?: { method: string; candidates_tested: number; discovery_start: string; discovery_end: string;
+      excluded_recent_candles?: number;
+      trials?: { strategy: LabStrategy; discovery_return: number; discovery_drawdown: number; trades: number }[];
+      validation_start: string; validation_end: string; training: LabMetrics[]; validation: LabMetrics[];
+      assessments: { key: string; status: string; discovery_trades: number; validation_trades: number }[] } } | null;
+}
+export function getLiveSimulation(): Promise<LabStatus> { return getJson<LabStatus>('/simulator/live'); }
+export function setLiveSimulation(active: boolean): Promise<LabStatus> { return postJson<LabStatus>('/simulator/live', { active }); }
+
+export interface HyperliquidConnection {
+  connection: { network: 'mainnet' | 'testnet'; account_address: string } | null;
+  execution_enabled: false; mode: 'read_only';
+}
+export interface HyperliquidAccount {
+  account_mode: string;
+  trading_balance: { equity: number; available: number; source: string } | null;
+  spot_balances: { coin: string; token: number; total: string; hold: string }[];
+  network: 'mainnet' | 'testnet'; account_address: string; checked_at: string;
+  margin: { accountValue: string; totalMarginUsed: string }; withdrawable?: string;
+  positions: { coin: string; szi: string; entryPx?: string; unrealizedPnl: string }[];
+  open_orders: { oid: number; coin: string; side: string; sz: string; limitPx: string }[];
+}
+export const getHyperliquidConnection = () => getJson<HyperliquidConnection>('/hyperliquid/connection');
+export const saveHyperliquidConnection = (network: string, account_address: string) => postJson<HyperliquidConnection>('/hyperliquid/connection', { network, account_address });
+export const getHyperliquidAccount = () => getJson<HyperliquidAccount>('/hyperliquid/account');
+export interface HyperliquidStrategyConfiguration {
+  selected: LabStrategy | null; strategies: LabStrategy[]; active_strategy: null;
+  execution_enabled: false; blockers: string[];
+}
+export const getHyperliquidStrategy = () => getJson<HyperliquidStrategyConfiguration>('/hyperliquid/strategy');
+export const saveHyperliquidStrategy = (strategy_key: string) => postJson<HyperliquidStrategyConfiguration>('/hyperliquid/strategy', { strategy_key });

@@ -7,10 +7,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import settings
 from .db import ensure_signal_table, fetch_signal_rows, get_database_url
 from .auth import auth_api, authenticated_user
+from .simulation_api import simulation_api
+from .hyperliquid_api import hyperliquid_api
+from .hyperliquid_setup import setup_api
 
 
 def get_base_url() -> str:
@@ -22,6 +26,10 @@ LOGS_DIR = BASE_DIR / "logs"
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+app.config['APP_ENV'] = APP_ENV
+if os.getenv('TRUST_LOCAL_PROXY', 'false').lower() == 'true':
+    # Enable only behind the supplied loopback-only WSGI service and trusted proxy.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=0, x_proto=1, x_host=0, x_port=0, x_prefix=0)
 AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY")
 if APP_ENV == "production" and (not AUTH_SECRET_KEY or len(AUTH_SECRET_KEY) < 32):
     raise RuntimeError("A strong AUTH_SECRET_KEY must be configured in production")
@@ -37,6 +45,9 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
 )
 app.register_blueprint(auth_api)
+app.register_blueprint(simulation_api)
+app.register_blueprint(hyperliquid_api)
+app.register_blueprint(setup_api)
 
 
 @app.after_request

@@ -3,3 +3,7 @@ Flask>=3.0,<4
 numpy>=2.0,<3
 pandas>=2.2,<3
 psycopg[binary]>=3.1,<4
+cryptography>=44,<47
+eth-account>=0.13,<0.14
+hyperliquid-python-sdk==0.23.0
+gunicorn>=23,<24; sys_platform != "win32"
