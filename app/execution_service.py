@@ -6,7 +6,7 @@ from dataclasses import asdict
 from psycopg.types.json import Jsonb
 from .candle_storage import _connect
 from .strategy_research import candidates
-from .execution_engine import step, ExecutionBlocked, EntryStopped
+from .execution_engine import step, prepare_emergency_close, ExecutionBlocked, EntryStopped
 from .hyperliquid_setup import validate_limits
 
 
@@ -48,6 +48,39 @@ def activate(user_id):
 def stop_entries(user_id):
     with _connect() as conn:
         conn.execute('UPDATE hyperliquid_runs SET active=FALSE WHERE user_id=%s AND managing', (user_id,))
+
+
+def emergency_close(user_id):
+    """User-initiated BTC flatten. The worker uses its durable reduce-only journal."""
+    from .execution_broker import Broker
+    with _connect() as conn:
+        row = conn.execute('SELECT id FROM hyperliquid_runs WHERE user_id=%s AND managing ORDER BY id DESC LIMIT 1',
+                           (user_id,)).fetchone()
+        if row is None:
+            raise ExecutionBlocked('Nenhuma sessão em gerenciamento.')
+        run_id = row['id']
+        lock_key = run_id + 8_000_000_000
+        if not conn.execute('SELECT pg_try_advisory_lock(%s) AS locked', (lock_key,)).fetchone()['locked']:
+            raise ExecutionBlocked('Executor processando esta sessão; tente novamente em instantes.')
+        try:
+            row = conn.execute('SELECT * FROM hyperliquid_runs WHERE id=%s AND user_id=%s AND managing FOR UPDATE',
+                               (run_id, user_id)).fetchone()
+            if row is None:
+                raise ExecutionBlocked('Sessão não encontrada ou já encerrada.')
+            # Persist the stop before any external lookup, even if the lookup fails.
+            conn.execute('UPDATE hyperliquid_runs SET active=FALSE WHERE id=%s', (run_id,))
+            conn.commit()
+            broker = Broker(row['configuration'])
+            positions = broker.get_positions()
+            position = next((p for p in positions if p['coin'] == 'BTC'), None)
+            state = prepare_emergency_close(dict(row['state']), position, int(time.time() * 1000))
+            conn.execute('UPDATE hyperliquid_runs SET active=FALSE, state=%s, heartbeat=clock_timestamp() WHERE id=%s',
+                         (Jsonb(state), run_id))
+            conn.commit()
+        finally:
+            conn.rollback()
+            conn.execute('SELECT pg_advisory_unlock(%s)', (lock_key,))
+    tick(run_id)
 
 
 class Journal:

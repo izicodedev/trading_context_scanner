@@ -15,6 +15,7 @@ const status = computed(() => {
   if (!data.value) return 'Carregando'
   if (stale.value) return 'Processamento atrasado'
   if (data.value.run?.state.phase === 'submitting') return 'Entrada em verificação'
+  if (data.value.run?.state.phase === 'closing') return 'Zerando posição'
   if (data.value.run?.active) return 'Operando'
   if (data.value.run?.managing) return 'Gerenciando posição'
   return 'Parado'
@@ -29,12 +30,13 @@ const entryError = computed(() => {
   return `Falha no envio: ${diagnostic.type}.`
 })
 const url = `${(import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')}/hyperliquid/execution`
-async function request(active?: boolean) {
+async function request(command?: boolean | 'close_position') {
   if (busy.value) return
   busy.value = true
   try {
-    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', ...(active === undefined ? {} : {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-IziCrypto-Setup': '1' }, body: JSON.stringify({ active })
+    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', ...(command === undefined ? {} : {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-IziCrypto-Setup': '1' },
+      body: JSON.stringify(command === 'close_position' ? { action: command } : { active: command })
     }) })
     const result = await response.json()
     if (!response.ok) throw new Error(result.error ?? 'Falha ao consultar execução.')
@@ -54,9 +56,9 @@ onBeforeUnmount(() => window.clearInterval(timer))
     <p v-if="data?.run?.managing" class="heartbeat">Último processamento: {{ data.run.heartbeat ? new Date(data.run.heartbeat).toLocaleString('pt-BR') : 'Aguardando worker' }}</p>
     <p v-if="stale" class="alert" role="alert">Processamento atrasado. Confira a posição e as proteções na Hyperliquid.</p>
     <div v-if="data?.run?.state.phase === 'open'" class="position"><div><span>Posição</span><strong>{{ data.run.state.quantity }} BTC</strong></div><div><span>Entrada</span><strong>{{ data.run.state.entry_price }}</strong></div><div><span>Stop</span><strong>{{ data.run.state.stop }}</strong></div><div><span>Alvo</span><strong>{{ data.run.state.target }}</strong></div></div>
-    <div class="actions"><button v-if="data?.run?.active" class="stop" :disabled="busy" @click="request(false)">Parar novas entradas</button><button v-else :disabled="busy || !allowed || data?.run?.managing" @click="request(true)">Ativar estratégia</button><span v-if="data && !allowed">Execução nesta rede bloqueada no servidor</span><span v-else-if="data?.run?.managing && data.run.state.phase === 'submitting'">Entrada sem confirmação; nova ativação bloqueada até a conferência.</span><span v-else-if="data?.run?.managing && !data.run.active">A posição aberta continua sendo gerenciada</span></div>
+    <div class="actions"><button v-if="data?.run?.active" class="stop" :disabled="busy" @click="request(false)">Parar novas entradas</button><button v-else :disabled="busy || !allowed || data?.run?.managing" @click="request(true)">Ativar estratégia</button><button v-if="data?.run?.managing && ['submitting', 'protecting', 'open', 'halted'].includes(data.run.state.phase)" class="emergency" :disabled="busy" @click="request('close_position')">Zerar BTC agora</button><span v-if="data && !allowed">Execução nesta rede bloqueada no servidor</span><span v-else-if="data?.run?.managing && data.run.state.phase === 'submitting'">Entrada sem confirmação; nova ativação bloqueada até a conferência.</span><span v-else-if="data?.run?.managing && !data.run.active">A posição aberta continua sendo gerenciada</span></div>
     <p v-if="error" class="alert" role="alert">{{ error }}</p>
-    <details><summary>Como funciona o controle</summary><p>Parar impede novas entradas. A gestão de uma posição já aberta continua, inclusive stop, alvo e prazo máximo. As regras ficam congeladas por sessão. Envios incertos exigem conferência na Hyperliquid.</p></details>
+    <details><summary>Como funciona o controle</summary><p>Parar impede novas entradas. Zerar BTC consulta a posição real e solicita uma saída reduce-only, sem inverter o lado; acompanhe a confirmação na Hyperliquid. As regras ficam congeladas por sessão. Envios incertos exigem conferência.</p></details>
   </section>
 </template>
 <style scoped>
@@ -66,5 +68,6 @@ onBeforeUnmount(() => window.clearInterval(timer))
 h2 { margin: 24px 0 10px; font-size: clamp(1.3rem, 2.5vw, 1.8rem); font-weight: 600; line-height: 1.3; letter-spacing: -.025em; }p { margin: 0; color: #a7b5c6; font-size: .83rem; line-height: 1.6; }.message { min-height: 2.6em; }.heartbeat { margin-top: 10px; color: #8193a9; font-size: .73rem; }
 .position { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; border-top: 1px solid #2b3d52; margin-top: 20px; padding-top: 18px; }.position span { display: block; color: #8ea1b7; font-size: .68rem; }.position strong { display: block; margin-top: 6px; font-size: .85rem; font-weight: 600; }
 .actions { justify-content: flex-start; margin-top: 26px; }.actions span { color: #8ea1b7; font-size: .75rem; }button { border: 0; border-radius: 8px; padding: 11px 18px; background: #dce8f3; color: #0a1928; font-size: .8rem; font-weight: 650; cursor: pointer; }button.stop { background: #283b4e; color: #e5edf7; }button:disabled { opacity: .45; cursor: not-allowed; }
+.emergency { background: #663d36; color: #fff0e9; }
 .alert { margin-top: 12px; color: #f4a9a9; }details { margin-top: 24px; }summary { width: max-content; color: #8ea1b7; cursor: pointer; font-size: .75rem; }details p { margin-top: 12px; }button:focus-visible,summary:focus-visible { outline: 2px solid #93c5fd; outline-offset: 4px; }@media(max-width:650px) { .execution { padding: 20px; }.position { grid-template-columns: repeat(2, 1fr); } }
 </style>

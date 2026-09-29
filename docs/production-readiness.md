@@ -44,8 +44,13 @@ corretora não confirmar o destino da entrada. Se a consulta por CLOID continuar
 `unknownOid`, use `python -m app.reconcile_execution ID` para conferir a sessão
 sem alterá-la. Após inspecionar a conta na Hyperliquid, o operador pode executar
 `python -m app.reconcile_execution ID --release`. O comando exige sessão parada,
-entrada pendente há pelo menos 30 minutos, um único registro de entrada no journal,
+entrada pendente há pelo menos 60 segundos, um único registro de entrada no journal,
 CLOID desconhecido, ausência de posições, ordens e fills posteriores ao envio.
-Ele não envia nem cancela ordens; só encerra o gerenciamento local dessa sessão.
+Após 60 segundos da tentativa, o comando de liberação repete essas consultas
+em dois momentos antes de encerrar a sessão. Esse prazo não impede a zeragem
+imediata de uma posição BTC observada: o controle **Zerar BTC agora** envia
+somente uma ordem reduce-only, valida lado e tamanho da posição, bloqueia novas
+entradas e mantém a reconciliação da saída até confirmar a exposição residual.
+O comando de reconciliação não envia nem cancela ordens; só encerra o gerenciamento local dessa sessão.
 Uma nova ativação continua exigindo o botão na interface e todas as validações do
 executor. Se qualquer verificação falhar, a sessão permanece bloqueada.

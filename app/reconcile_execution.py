@@ -13,7 +13,7 @@ from .candle_storage import _connect
 from .execution_broker import Broker
 
 
-MIN_AGE_MS = 30 * 60 * 1000
+MIN_AGE_MS = 60 * 1000
 
 
 def verify_release(row, actions, order_status, positions, orders, fills, now_ms):
@@ -22,7 +22,7 @@ def verify_release(row, actions, order_status, positions, orders, fills, now_ms)
         raise ValueError('A sessão não é uma entrada incerta com novas entradas paradas.')
     submitted_ms = state.get('submitted_ms')
     if type(submitted_ms) is not int or not MIN_AGE_MS <= now_ms - submitted_ms < 30 * 24 * 60 * 60 * 1000:
-        raise ValueError('Horário de envio ausente, recente demais ou antigo demais para esta recuperação.')
+        raise ValueError('Aguarde 60 segundos após o envio para encerrar uma entrada sem execução.')
     if len(actions) != 1 or not actions[0]['action_key'].startswith('entry:') or actions[0]['status'] != 'pending' \
             or actions[0]['cloid'] != state.get('entry_cloid') or actions[0]['response'] is not None:
         raise ValueError('O journal não contém uma única entrada pendente correspondente ao CLOID.')
@@ -52,11 +52,17 @@ def reconcile(run_id, release=False, broker_factory=Broker):
             actions = conn.execute('SELECT action_key, status, cloid, response FROM hyperliquid_actions WHERE run_id=%s',
                                    (run_id,)).fetchall()
             broker = broker_factory(row['configuration'])
-            order_status = broker.lookup(row['state'].get('entry_cloid'))
-            positions, orders, _, _ = broker.account()
-            fills = broker.info.user_fills_by_time(broker.owner, row['state'].get('submitted_ms'))
-            verify_release(row, actions, order_status, positions, orders, fills, int(time.time() * 1000))
+            def check_exchange():
+                order_status = broker.lookup(row['state'].get('entry_cloid'))
+                positions, orders, _, _ = broker.account(management=True)
+                fills = broker.info.user_fills_by_time(broker.owner, row['state'].get('submitted_ms'))
+                verify_release(row, actions, order_status, positions, orders, fills, int(time.time() * 1000))
+            check_exchange()
             if release:
+                # A second fresh snapshot catches delayed API visibility while the
+                # executor is excluded by the session advisory lock.
+                time.sleep(3)
+                check_exchange()
                 state = dict(row['state'])
                 state.update(phase='waiting', pause_entries=True,
                              message='Entrada não encontrada na reconciliação operacional; sessão encerrada sem nova ordem.')

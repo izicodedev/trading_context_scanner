@@ -15,7 +15,8 @@ class Broker:
     positions = []
     orders = []
     def __init__(self): self.sent = []; self.fail = None; self.positions = []; self.orders = []
-    def account(self): return self.positions, self.orders, 100, 80
+    def get_positions(self): return self.positions
+    def account(self, management=False): return self.positions, self.orders, 100, 80
     def authorized(self): pass
     def daily(self, since): return [], []
     def candles(self, now): return []

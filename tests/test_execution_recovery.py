@@ -1,6 +1,6 @@
 import pytest
 from test_execution_engine import Broker, Journal, config
-from app.execution_engine import step
+from app.execution_engine import step, prepare_emergency_close, ExecutionBlocked
 from app import execution_service
 
 
@@ -83,6 +83,82 @@ def test_recovered_position_never_closes_external_larger_exposure():
     state=dict(phase='submitting',side='LONG',entry_cloid='entry',requested_quantity=.01)
     step(b,j,config(),state,False,1000)
     assert state['phase']=='halted' and not b.sent
+
+
+@pytest.mark.parametrize('phase', ['submitting', 'protecting', 'open', 'halted'])
+@pytest.mark.parametrize('side,size', [('LONG', '.005'), ('SHORT', '-.005')])
+def test_user_flatten_sends_only_reduce_close_and_never_new_entry(phase, side, size):
+    b, j = Broker(), Journal()
+    b.positions = [dict(coin='BTC', szi=size)]
+    state = dict(phase=phase, side=side, entry_cloid='entry', requested_quantity=.01,
+                 quantity=.01, protection_cloids=['sl', 'tp'])
+    prepare_emergency_close(state, b.positions[0], 1000)
+    assert state['phase'] == 'closing' and state['pause_entries']
+    step(b, j, config(), state, False, 1000)
+    assert b.sent == [('close', {'quantity': .005, 'buy': side == 'SHORT'})]
+    assert state['close_pending'] == 'close:entry:1'
+    step(b, j, config(), state, False, 2000)
+    assert len([kind for kind, _ in b.sent if kind == 'close']) == 1
+    assert state['phase'] == 'closing'
+
+
+@pytest.mark.parametrize('position', [None, {'coin': 'BTC', 'szi': '-.005'},
+                                     {'coin': 'BTC', 'szi': '.02'}, {'coin': 'BTC', 'szi': 'not-a-number'}])
+def test_user_flatten_rejects_absent_or_divergent_position(position):
+    state = dict(phase='submitting', side='LONG', entry_cloid='entry', requested_quantity=.01)
+    with pytest.raises(ExecutionBlocked):
+        prepare_emergency_close(state, position, 1000)
+    assert state['phase'] == 'submitting'
+
+
+def test_management_does_not_require_spot_balance(monkeypatch):
+    b, j = Broker(), Journal()
+    b.positions = [dict(coin='BTC', szi='.01')]
+    b.account = lambda *args, **kwargs: pytest.fail('closing must not query balances or orders')
+    state = closing()
+    step(b, j, config(), state, False, 1000)
+    assert b.sent[0][0] == 'close'
+
+
+@pytest.mark.parametrize('position', [None, {'coin': 'BTC', 'szi': '.005'}])
+def test_emergency_endpoint_stops_entries_before_lookup_and_ticks_only_with_position(monkeypatch, position):
+    from contextlib import contextmanager
+    from app import execution_broker
+    events = []
+    row = dict(id=42, user_id=7, state=dict(phase='submitting', side='LONG',
+               entry_cloid='entry', requested_quantity=.01), configuration={'network': 'mainnet'})
+    class Cursor:
+        def __init__(self, value=None): self.value = value
+        def fetchone(self): return self.value
+    class Connection:
+        def execute(self, sql, params):
+            events.append(sql)
+            if sql.startswith('SELECT id FROM'): return Cursor({'id': 42})
+            if 'pg_try_advisory_lock' in sql: return Cursor({'locked': True})
+            if sql.startswith('SELECT * FROM'): return Cursor(row)
+            return Cursor()
+        def commit(self): events.append('COMMIT')
+        def rollback(self): events.append('ROLLBACK')
+    @contextmanager
+    def connect(): yield Connection()
+    class Broker:
+        def __init__(self, config): pass
+        def get_positions(self):
+            events.append('ACCOUNT')
+            return [position] if position else []
+    monkeypatch.setattr(execution_service, '_connect', connect)
+    monkeypatch.setattr(execution_broker, 'Broker', Broker)
+    monkeypatch.setattr(execution_service, 'tick', lambda run_id: events.append(('TICK', run_id)))
+    if position:
+        execution_service.emergency_close(7)
+        assert ('TICK', 42) in events
+        assert len([e for e in events if isinstance(e, str) and e.startswith('UPDATE hyperliquid_runs')]) == 2
+    else:
+        with pytest.raises(ExecutionBlocked, match='Nenhuma posição'):
+            execution_service.emergency_close(7)
+        assert not any(isinstance(e, tuple) and e[0] == 'TICK' for e in events)
+    assert events.index('UPDATE hyperliquid_runs SET active=FALSE WHERE id=%s') < events.index('ACCOUNT')
+    assert events[events.index('ACCOUNT') - 1] == 'COMMIT'
 
 
 def test_stop_before_submission_does_not_create_journal_or_send():

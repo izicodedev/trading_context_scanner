@@ -70,9 +70,17 @@ class Broker:
         if not any(a['address'].lower() == self.agent and a['validUntil'] > now for a in self.info.extra_agents(self.owner)):
             raise ExecutionBlocked('Carteira de API expirada ou revogada.')
 
-    def account(self):
+    def get_positions(self):
+        state = self.info.user_state(self.owner)
+        return [p['position'] for p in state['assetPositions'] if float(p['position']['szi']) != 0]
+
+    def account(self, management=False):
         state = self.info.user_state(self.owner)
         positions = [p['position'] for p in state['assetPositions'] if float(p['position']['szi']) != 0]
+        orders = self.info.frontend_open_orders(self.owner)
+        if management:
+            # Closing exposure must not depend on spot balance or account-mode APIs.
+            return positions, orders, 0, 0
         mode = self.info.query_user_abstraction_state(self.owner)
         spot = self.info.spot_user_state(self.owner) if mode == 'unifiedAccount' else None
         try:
@@ -80,7 +88,7 @@ class Broker:
         except (ValueError, KeyError, TypeError) as exc:
             raise ExecutionBlocked('Não foi possível confirmar o saldo operacional para o modo desta conta.') from exc
         self.balance_source = source
-        return positions, self.info.frontend_open_orders(self.owner), equity, available
+        return positions, orders, equity, available
 
     def daily(self, since):
         return self.info.user_fills_by_time(self.owner, since), self.info.user_funding_history(self.owner, since)

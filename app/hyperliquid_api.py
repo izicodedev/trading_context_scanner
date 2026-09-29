@@ -62,12 +62,15 @@ def execution_control():
             if request.headers.get('X-IziCrypto-Setup') != '1' or not request.is_json:
                 return jsonify(error='Solicitação inválida.'), 403
             payload = request.get_json(silent=True)
-            if not isinstance(payload, dict) or set(payload) != {'active'} or type(payload['active']) is not bool:
-                return jsonify(error='Informe active como booleano.'), 400
-            if payload['active']:
-                execution_service.activate(session['user_id'])
+            if isinstance(payload, dict) and payload == {'action': 'close_position'}:
+                execution_service.emergency_close(session['user_id'])
+            elif isinstance(payload, dict) and set(payload) == {'active'} and type(payload['active']) is bool:
+                if payload['active']:
+                    execution_service.activate(session['user_id'])
+                else:
+                    execution_service.stop_entries(session['user_id'])
             else:
-                execution_service.stop_entries(session['user_id'])
+                return jsonify(error='Solicitação de execução inválida.'), 400
         return jsonify(execution_service.status(session['user_id']))
     except ExecutionBlocked as exc:
         return jsonify(error=str(exc)), 409

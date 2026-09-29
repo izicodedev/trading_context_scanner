@@ -134,3 +134,18 @@ def test_network_permission_failure_is_actionable(client, monkeypatch):
     response = client.get('/api/hyperliquid/account')
     assert response.status_code == 502
     assert 'permissão de acesso à rede' in response.json['error']
+
+
+def test_emergency_close_requires_header_and_scopes_to_authenticated_user(client, monkeypatch):
+    from app import execution_service
+    calls = []
+    monkeypatch.setattr(execution_service, 'emergency_close', lambda uid: calls.append(uid))
+    monkeypatch.setattr(execution_service, 'status', lambda uid: {'run': None})
+    url = '/api/hyperliquid/execution'
+    assert client.post(url, json={'action': 'close_position'}).status_code == 403
+    assert client.post(url, json={'action': 'close_position', 'user_id': 8},
+                       headers={'X-IziCrypto-Setup': '1'}).status_code == 400
+    assert calls == []
+    response = client.post(url, json={'action': 'close_position'}, headers={'X-IziCrypto-Setup': '1'})
+    assert response.status_code == 200
+    assert calls == [7]
