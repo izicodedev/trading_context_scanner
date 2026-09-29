@@ -24,23 +24,24 @@ Continua existindo um único botão para ativar/parar a simulação.
 
 ## Seleção reproduzível
 
-Ao iniciar uma nova sessão, strategy_research compara nove configurações
-predefinidas (três por família) nos primeiros 70% dos até 1.000 candles de 5m
-disponíveis. Escolhe uma por família usando, nesta ordem:
+Ao iniciar uma nova sessão, `strategy_research` compara 63 configurações do
+catálogo nos até 8.640 candles de 5m mais recentes. Os primeiros 70% formam a
+descoberta e os 30% seguintes formam a triagem temporal. A seleção automática
+exige ao menos cinco operações na descoberta e 15 na triagem, lucro líquido
+positivo e profit factor maior que um em ambos. Entre as elegíveis, escolhe até
+três pelo maior acerto na triagem, seguido do retorno e da amostra.
 
-1. Ter pelo menos cinco operações na descoberta.
-2. Maior retorno líquido menos metade do drawdown percentual.
-3. Maior quantidade de operações, em caso de empate.
+Se nenhuma passar, a pesquisa fica registrada e a simulação não inicia
+automaticamente para essa moeda. O usuário pode escolher manualmente uma
+hipótese experimental. Os indicadores usam o passado para warm-up, mas nenhuma
+posição da descoberta é transportada para a triagem. As regras escolhidas ficam
+congeladas durante a sessão. Todos os candidatos e parâmetros são registrados,
+junto a hash SHA-256 dos dados e resultados de ambos os períodos em
+`snapshot.research`.
 
-Somente depois, as três escolhidas são avaliadas nos 30% finais. Os indicadores
-usam o passado para warm-up, mas nenhuma posição da descoberta é transportada
-para a validação. As regras escolhidas ficam congeladas durante a sessão.
-Todos os candidatos e parâmetros são registrados, junto a hash SHA-256 dos
-dados, períodos, resultados da descoberta e validação, em snapshot.research.
-
-As três famílias são retomada da faixa após varredura, retomada de momentum
-na direção das EMAs e falha de rompimento. Os parâmetros completos estão
-centralizados em candidates(). Todas usam 5x e margem de 25% para não confundir
+O catálogo inclui retomada da faixa, momentum, falha de rompimento,
+continuidade de tendência, canal direcional e recuperação de extremo. Os
+parâmetros completos estão centralizados em `candidates()`. Todas usam 5x e margem de 25% para não confundir
 comparação de regras com diferenças de exposição. Permanecem os custos e as
 limitações de execução da simulação anterior.
 
@@ -52,10 +53,9 @@ que o lucro seja positivo. Com amostra maior, resultado líquido positivo e
 profit factor acima de um recebem apenas "sinal inicial favorável".
 Os limiares são critérios operacionais, não testes de significância estatística.
 
-A validação é temporal e exploratória; partes do mesmo histórico já haviam
-sido inspecionadas na versão anterior. Não equivale a um teste cego independente.
-O acompanhamento futuro é separado. Não se repete a busca no trecho de validação
-para forçar um resultado positivo, nem se promete atingir 5% ao dia.
+A triagem temporal participa da seleção; seu desempenho não é uma estimativa
+independente de retorno futuro. O acompanhamento posterior em papel é separado.
+Não se promete atingir 5% ao dia.
 
 ## Sessões anteriores
 

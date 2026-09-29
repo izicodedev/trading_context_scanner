@@ -77,13 +77,14 @@ function syncAutomaticSelection() {
 const visibleCatalog = computed(() => catalog.value
   .filter(item => `${item.name} ${item.description} ${item.key}`.toLocaleLowerCase('pt-BR').includes(catalogSearch.value.toLocaleLowerCase('pt-BR')))
   .sort((a, b) => Number(selectedKeys.value.includes(b.key)) - Number(selectedKeys.value.includes(a.key))
-    || (trialWinRate(b.key) ?? validation(b.key)?.win_rate ?? -1) - (trialWinRate(a.key) ?? validation(a.key)?.win_rate ?? -1)
+    || Number(Boolean(trial(b.key)?.qualified)) - Number(Boolean(trial(a.key)?.qualified))
+    || (trial(b.key)?.validation_win_rate ?? validation(b.key)?.win_rate ?? -1) - (trial(a.key)?.validation_win_rate ?? validation(a.key)?.win_rate ?? -1)
     || Number(Boolean(b.entry_rule)) - Number(Boolean(a.entry_rule))
-    || (validation(b.key)?.total_return_pct ?? trialReturn(b.key) ?? -Infinity)
-      - (validation(a.key)?.total_return_pct ?? trialReturn(a.key) ?? -Infinity)
+    || (trial(b.key)?.validation_return ?? validation(b.key)?.total_return_pct ?? trialReturn(b.key) ?? -Infinity)
+      - (trial(a.key)?.validation_return ?? validation(a.key)?.total_return_pct ?? trialReturn(a.key) ?? -Infinity)
     || a.name.localeCompare(b.name, 'pt-BR')))
+const trial = (key: string) => testedStrategies.value.find(item => item.strategy.key === key)
 const trialReturn = (key: string) => testedStrategies.value.find(item => item.strategy.key === key)?.discovery_return
-const trialWinRate = (key: string) => testedStrategies.value.find(item => item.strategy.key === key)?.win_rate
 function toggleKey(key: string) {
   catalogError.value = ''
   if (selectedKeys.value.includes(key)) selectedKeys.value = selectedKeys.value.filter(item => item !== key)
@@ -203,7 +204,7 @@ onBeforeUnmount(() => { if (polling) window.clearInterval(polling); revision++ }
       <div class="sim-controls">
         <span class="sim-status" :class="{ active: state?.active && !stale }"><i />{{ loading ? 'Carregando' : stale ? 'Dados atrasados' : state?.active ? 'Em execução' : 'Parada' }}</span>
         <button class="sim-secondary" type="button" @click="openCreate">Criar estratégia</button>
-        <button :disabled="busy || loading || !state" type="button" @click="toggle">{{ busy ? 'Processando…' : state?.active ? 'Parar simulação' : 'Ativar simulação' }}</button>
+        <button :disabled="busy || loading || !state" type="button" @click="toggle">{{ busy ? 'Processando…' : state?.active ? 'Parar simulação' : state?.snapshot && !sessionStrategies.length ? 'Reavaliar estratégias' : 'Ativar simulação' }}</button>
       </div>
     </header>
     <p v-if="error || state?.last_error" class="sim-error" role="alert">{{ error || state?.last_error }}</p>
@@ -231,27 +232,27 @@ onBeforeUnmount(() => { if (polling) window.clearInterval(polling); revision++ }
       <p class="sim-caption">Acerto conta apenas operações fechadas com lucro após custos. Sem operações, o acerto aparece como “—”.</p>
     </section>
     <section v-else-if="state" class="sim-empty" role="status">
-      <h3>Aguardando avaliação das estratégias</h3>
-      <p>Ative a simulação para avaliar o histórico e acompanhar juntas as estratégias selecionadas.</p>
+      <h3>{{ state.snapshot ? 'Nenhuma estratégia aprovada nesta moeda' : 'Aguardando avaliação das estratégias' }}</h3>
+      <p>{{ state.snapshot?.research?.selection_message || 'Ative a simulação para avaliar o histórico e acompanhar juntas as estratégias selecionadas.' }}</p>
     </section>
     <details class="sim-picker" aria-label="Escolher estratégias para simular" open>
-      <summary class="sim-picker-head"><div><h3>Escolher estratégias</h3><p>{{ automaticSelection ? sessionKeys.length ? 'Estas são as estratégias da sessão atual. Na próxima, o padrão serão as três maiores taxas de acerto na descoberta.' : 'Ao iniciar, o padrão serão as três maiores taxas de acerto na descoberta.' : 'Seleção salva para a próxima sessão. A sessão atual mantém as regras com que começou.' }}</p></div><span>{{ selectedKeys.length }}/12 selecionadas</span></summary>
+      <summary class="sim-picker-head"><div><h3>Escolher estratégias</h3><p>{{ automaticSelection ? 'A seleção automática usa até três hipóteses lucrativas nos dois períodos históricos, ordenadas pelo acerto no segundo.' : 'Seleção salva para a próxima sessão. A sessão atual mantém as regras com que começou.' }}</p></div><span>{{ selectedKeys.length }}/12 selecionadas</span></summary>
       <div class="sim-picker-actions"><input v-model="catalogSearch" type="search" placeholder="Buscar por nome ou regra" aria-label="Buscar estratégias" /><button class="sim-secondary" type="button" :disabled="catalogBusy || !selectionChanged" @click="saveSelection">{{ catalogBusy ? 'Salvando…' : 'Salvar seleção' }}</button></div>
-      <p v-if="automaticSelection && !sessionKeys.length" class="sim-muted">Ao iniciar, o simulador escolhe as três maiores taxas de acerto da descoberta entre estratégias com amostra suficiente.</p>
+      <p v-if="automaticSelection && !sessionKeys.length" class="sim-muted">Se nenhuma hipótese cumprir os critérios, a simulação não inicia automaticamente. Você ainda pode selecionar uma hipótese experimental.</p>
       <div class="sim-picker-list">
-        <label v-for="strategy in visibleCatalog" :key="strategy.key" class="sim-picker-item"><input type="checkbox" :checked="selectedKeys.includes(strategy.key)" :disabled="!selectedKeys.includes(strategy.key) && selectedKeys.length >= 12" @change="toggleKey(strategy.key)" /><span><strong>{{ strategyName(strategy) }}</strong><small>{{ sessionKeys.includes(strategy.key) && state?.active ? 'Em simulação · ' : '' }}{{ strategy.entry_rule ? 'Criada por você' : 'Catálogo' }} · {{ strategy.leverage }}×<template v-if="trialWinRate(strategy.key) != null"> · descoberta {{ percent(trialWinRate(strategy.key)) }} acerto</template><template v-else-if="validation(strategy.key)"> · validação {{ percent(validation(strategy.key)?.win_rate) }} acerto</template><template v-else-if="trialReturn(strategy.key) != null"> · descoberta {{ percent(trialReturn(strategy.key)) }} retorno</template></small></span></label>
+        <label v-for="strategy in visibleCatalog" :key="strategy.key" class="sim-picker-item"><input type="checkbox" :checked="selectedKeys.includes(strategy.key)" :disabled="!selectedKeys.includes(strategy.key) && selectedKeys.length >= 12" @change="toggleKey(strategy.key)" /><span><strong>{{ strategyName(strategy) }}</strong><small>{{ sessionKeys.includes(strategy.key) && state?.active ? 'Em simulação · ' : '' }}{{ strategy.entry_rule ? 'Criada por você' : 'Catálogo' }} · {{ strategy.leverage }}×<template v-if="trial(strategy.key)?.qualified != null"> · {{ trial(strategy.key)?.qualified ? 'apta na triagem' : 'não aprovada' }} · retorno {{ percent(trial(strategy.key)?.validation_return) }} no segundo período · {{ percent(trial(strategy.key)?.validation_win_rate) }} acerto</template><template v-else-if="validation(strategy.key)"> · pesquisa anterior · validação {{ percent(validation(strategy.key)?.total_return_pct) }} retorno · {{ percent(validation(strategy.key)?.win_rate) }} acerto</template><template v-else-if="trial(strategy.key)"> · pesquisa anterior · descoberta {{ percent(trialReturn(strategy.key)) }} retorno</template></small></span></label>
         <p v-if="!catalog.length" class="sim-muted">Carregando catálogo…</p><p v-else-if="!visibleCatalog.length" class="sim-muted">Nenhuma estratégia encontrada.</p>
       </div>
       <p v-if="catalogError" class="sim-error" role="alert">{{ catalogError }}</p><p v-if="notice" class="sim-muted" role="status">{{ notice }}</p>
     </details>
     <p v-if="state?.snapshot" class="sim-caption">{{ sessionStrategies.length }} estratégias nesta sessão · {{ state.active ? 'Acompanhamento ativo' : 'Simulação parada — últimos resultados preservados' }}. Lucro histórico não garante lucro na sessão ao vivo.</p>
-    <p class="sim-notice" v-if="state?.snapshot?.research">{{ state.snapshot.research.candidates_tested }} configurações do catálogo comparadas na descoberta{{ state.snapshot.research.custom_tested ? `, mais ${state.snapshot.research.custom_tested} criada(s) por você` : '' }}. A validação usa os 30% seguintes dos dados. Amostra curta: nenhuma hipótese deve ser tratada como validada.</p>
+    <p class="sim-notice" v-if="state?.snapshot?.research">{{ state.snapshot.research.candidates_tested }} configurações do catálogo comparadas{{ state.snapshot.research.custom_tested ? `, mais ${state.snapshot.research.custom_tested} criada(s) por você` : '' }}. O segundo período histórico participa da seleção; não é uma prova independente. A sessão em papel acompanha o desempenho futuro.</p>
     <section class="sim-details" v-if="state">
       <details>
         <summary>Todas as estratégias testadas <span>{{ testedStrategies.length }} configurações · {{ state.snapshot?.symbol ?? props.symbol }}</span></summary>
         <div class="sim-detail-body sim-catalog">
           <p>Resultados desta pesquisa em {{ state.snapshot?.symbol ?? props.symbol }} · {{ state.snapshot?.timeframe ?? '5m' }}. Inclui resultados negativos e positivos; uma estratégia pode ter comportamento diferente em outra moeda.</p>
-          <p class="sim-muted">O catálogo foi comparado na descoberta. As escolhidas passaram pela validação separada e pela simulação ao vivo. Retornos incluem os custos estimados.</p>
+          <p class="sim-muted">O catálogo foi comparado nos dois períodos históricos. A triagem usa ambos; a sessão em papel é a observação independente. Retornos incluem os custos estimados.</p>
           <p v-if="!testedStrategies.length" class="sim-muted">Ainda não há configurações testadas registradas nesta sessão.</p>
           <details v-for="trial in testedStrategies" :key="trial.strategy.key">
             <summary>{{ strategyName(trial.strategy) }} <span>{{ trial.strategy.key }} · descoberta {{ percent(trial.discovery_return) }} · {{ trial.trades }} trades</span></summary>
@@ -263,10 +264,10 @@ onBeforeUnmount(() => { if (polling) window.clearInterval(polling); revision++ }
               <div class="sim-detail-grid">
                 <div><span>Retorno na descoberta</span><strong :class="trial.discovery_return > 0 ? 'positive' : trial.discovery_return < 0 ? 'negative' : ''">{{ percent(trial.discovery_return) }}</strong></div>
                 <div><span>Drawdown na descoberta</span><strong>{{ percent(trial.discovery_drawdown) }}</strong></div>
-                <div><span>Retorno na validação</span><strong>{{ percent(validation(trial.strategy.key)?.total_return_pct) }}</strong></div>
-                <div><span>Acerto na validação</span><strong>{{ percent(validation(trial.strategy.key)?.win_rate) }}</strong></div>
+                <div><span>Retorno no segundo período</span><strong :class="(trial.validation_return ?? 0) > 0 ? 'positive' : (trial.validation_return ?? 0) < 0 ? 'negative' : ''">{{ percent(trial.validation_return ?? validation(trial.strategy.key)?.total_return_pct) }}</strong></div>
+                <div><span>Acerto no segundo período</span><strong>{{ percent(trial.validation_win_rate ?? validation(trial.strategy.key)?.win_rate) }}</strong></div>
               </div>
-              <p class="sim-muted">{{ validation(trial.strategy.key) ? `${assessment(trial.strategy.key)} · ${validation(trial.strategy.key)?.closed_trades} trades na validação` : 'Não selecionada para validação nesta pesquisa.' }}</p>
+              <p class="sim-muted">{{ trial.qualified == null ? 'Pesquisa anterior; reavalie para ver a triagem completa.' : trial.qualified ? 'Apta na triagem histórica' : 'Não aprovada na triagem histórica' }} · {{ trial.validation_trades ?? validation(trial.strategy.key)?.closed_trades ?? '—' }} operações no segundo período.</p>
             </div>
           </details>
         </div>

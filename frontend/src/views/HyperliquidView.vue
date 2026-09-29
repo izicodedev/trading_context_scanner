@@ -24,16 +24,24 @@ const rankingError = ref('')
 const pct = (value: number) => `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`
 const rankedStrategies = computed(() => (strategyConfig.value?.strategies ?? []).map(strategy => {
   const validation = research.value?.research?.validation.find(item => item.strategy.key === strategy.key)
-  const discovery = research.value?.research?.trials?.find(item => item.strategy.key === strategy.key)
-  return { strategy, validation: validation && validation.closed_trades > 0 ? validation.total_return_pct : null,
-    discovery: discovery && discovery.trades > 0 ? discovery.discovery_return : null }
+  const trial = research.value?.research?.trials?.find(item => item.strategy.key === strategy.key)
+  return { strategy, qualified: Boolean(trial?.qualified),
+    validation: trial?.validation_return ?? (validation && validation.closed_trades > 0 ? validation.total_return_pct : null),
+    discovery: trial && trial.trades > 0 ? trial.discovery_return : null }
 }).sort((a, b) => {
-  const tier = (item: typeof a) => item.validation != null ? 2 : item.discovery != null ? 1 : 0
-  return tier(b) - tier(a) || (b.validation ?? b.discovery ?? -Infinity) - (a.validation ?? a.discovery ?? -Infinity) || a.strategy.key.localeCompare(b.strategy.key)
+  return Number(b.qualified) - Number(a.qualified)
+    || (b.validation ?? b.discovery ?? -Infinity) - (a.validation ?? a.discovery ?? -Infinity)
+    || a.strategy.key.localeCompare(b.strategy.key)
 }))
-const defaultStrategy = computed(() => rankedStrategies.value.find(item => item.validation != null || item.discovery != null))
+const defaultStrategy = computed(() => {
+  const hasTriagedResults = research.value?.research?.trials?.some(item => item.qualified != null)
+  return rankedStrategies.value.find(item => hasTriagedResults
+    ? item.qualified : item.validation != null && item.validation > 0)
+})
 const preview = computed(() => strategyConfig.value?.strategies.find(item => item.key === strategyKey.value))
-const performanceLabel = (item: typeof rankedStrategies.value[number]) => item.validation != null ? `${pct(item.validation)} validação` : item.discovery != null ? `${pct(item.discovery)} descoberta · sem validação` : 'Sem resultado'
+const performanceLabel = (item: typeof rankedStrategies.value[number]) => item.validation != null
+  ? `${pct(item.validation)} no segundo período${item.qualified ? ' · apta na triagem' : ' · não aprovada'}`
+  : item.discovery != null ? `${pct(item.discovery)} descoberta · sem triagem` : 'Sem resultado'
 const strategyBusy = ref(false)
 const strategyError = ref('')
 const setupState = ref<{ agent_address: string | null; risk_limits: unknown } | null>(null)
@@ -118,7 +126,7 @@ watch(() => props.symbol, async symbol => {
     <section class="panel strategy-panel">
       <div class="section-heading"><div><p class="eyebrow">{{ props.symbol === 'BTCUSDT' ? 'PRÓXIMA SESSÃO BTC' : 'PESQUISA ETH' }}</p><h3>Estratégia</h3></div><span v-if="strategyConfig?.selected && props.symbol === 'BTCUSDT'" class="saved-label">Selecionada</span></div>
       <p v-if="props.symbol !== 'BTCUSDT'" class="note">Pesquisa histórica de {{ props.symbol }}. O executor real atual opera somente BTC; trocar a moeda exibida não muda uma sessão em andamento nem ativa ordens em ETH.</p>
-      <p v-if="props.symbol !== 'BTCUSDT' && research" class="note">{{ rankedStrategies.slice(0, 3).map(item => `${strategyName(item.strategy)} · ${performanceLabel(item)}`).join(' | ') || 'Nenhum resultado ainda para ETH.' }}</p>
+      <p v-if="props.symbol !== 'BTCUSDT' && research" class="note">{{ research.research?.eligible_count === 0 ? 'Nenhuma hipótese aprovada na triagem histórica desta moeda.' : rankedStrategies.filter(item => item.qualified).slice(0, 3).map(item => `${strategyName(item.strategy)} · ${performanceLabel(item)}`).join(' | ') || 'Nenhum resultado de triagem disponível para esta moeda.' }}</p>
       <p v-if="strategyConfig?.selected && props.symbol === 'BTCUSDT'" class="selected-name">{{ strategyName(strategyConfig.selected) }}</p>
       <p v-else-if="props.symbol === 'BTCUSDT'" class="muted">Nenhuma estratégia salva.</p>
       <form v-if="props.symbol === 'BTCUSDT'" class="strategy-form" @submit.prevent="selectStrategy">

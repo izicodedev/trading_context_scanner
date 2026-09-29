@@ -164,7 +164,9 @@ export interface LabStatus {
     symbol: string; timeframe: string; history_candles: number;
     research?: { method: string; candidates_tested: number; discovery_start: string; discovery_end: string;
       excluded_recent_candles?: number; selected_manually?: boolean; custom_tested?: number;
-      trials?: { strategy: LabStrategy; discovery_return: number; discovery_drawdown: number; win_rate?: number | null; trades: number }[];
+      eligible_count?: number; selection_message?: string | null;
+      trials?: { strategy: LabStrategy; discovery_return: number; discovery_drawdown: number; win_rate?: number | null; trades: number;
+        validation_return?: number; validation_win_rate?: number | null; validation_trades?: number; qualified?: boolean }[];
       validation_start: string; validation_end: string; training: LabMetrics[]; validation: LabMetrics[];
       assessments: { key: string; status: string; discovery_trades: number; validation_trades: number }[] } } | null;
 }

@@ -1,4 +1,4 @@
-"""Small predefined search: select on discovery only, then report held-out results."""
+"""Screen predefined strategies on two historical periods before paper trading."""
 from dataclasses import asdict
 from hashlib import sha256
 
