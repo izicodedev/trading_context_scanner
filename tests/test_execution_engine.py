@@ -2,7 +2,7 @@ from dataclasses import asdict
 import pytest
 from app import execution_engine as engine
 from app.strategy_research import candidates
-from app.execution_broker import parse_order
+from app.execution_broker import OrderResponseError, parse_order
 from app import execution_service
 
 
@@ -96,6 +96,18 @@ def test_entry_uses_prechecked_market_price(signal):
     assert entry['limit_price'] == engine.price_round(10000 * 1.001, 5)
 
 
+def test_entry_exchange_reason_is_preserved_without_retry(signal):
+    b,j,state = Broker(),Journal(),{'phase':'waiting'}
+    def rejected(*args,**kwargs):
+        raise OrderResponseError('exchange_error', 'L1 error: expired order')
+    b.entry = rejected
+    with pytest.raises(OrderResponseError):
+        engine.step(b,j,config(),state,True,2000)
+    assert state['entry_error'] == {'type':'OrderResponseError','response_code':'exchange_error',
+                                    'exchange_message':'L1 error: expired order'}
+    assert state['phase'] == 'submitting'
+
+
 def test_sdk_entry_sends_ioc_at_supplied_limit_without_price_lookup():
     from app.execution_broker import Broker as SdkBroker
     class Exchange:
@@ -146,8 +158,17 @@ def test_daily_limit_blocks_entry(signal):
 
 
 def test_malformed_order_ack_is_not_success():
-    with pytest.raises(engine.ExecutionBlocked): parse_order({'status':'ok'})
+    with pytest.raises(OrderResponseError) as error: parse_order({'status':'ok'})
+    assert error.value.code == 'status_count'
     assert parse_order({'status':'ok','response':{'data':{'statuses':[{'error':'rejected'}]}}})['filled']==0
+
+
+def test_exchange_error_is_redacted_for_diagnostics():
+    address='0x'+'a'*40
+    with pytest.raises(OrderResponseError) as error:
+        parse_order({'status':'err','response':f'L1 error: API wallet {address} expired'})
+    assert error.value.code == 'exchange_error'
+    assert error.value.detail == 'L1 error: API wallet [endereço] expired'
 
 
 def test_networks_disabled_by_default(monkeypatch):

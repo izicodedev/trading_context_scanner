@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { LabStrategy } from '../services/api'
 import { strategyName } from '../services/strategyDisplay'
 const props = defineProps<{ network: string }>()
-interface Run { active: boolean; managing: boolean; heartbeat: string | null; state: { phase: string; message: string; strategy: LabStrategy; quantity?: number; entry_price?: number; stop?: number; target?: number; daily_pnl?: number; entry_error?: { type: string; http_status?: number } } }
+interface Run { active: boolean; managing: boolean; heartbeat: string | null; state: { phase: string; message: string; strategy: LabStrategy; quantity?: number; entry_price?: number; stop?: number; target?: number; daily_pnl?: number; entry_error?: { type: string; http_status?: number; response_code?: string; exchange_message?: string } } }
 const data = ref<{ run: Run | null; mainnet_enabled: boolean; testnet_enabled: boolean } | null>(null)
 const error = ref('')
 const busy = ref(false)
@@ -22,6 +22,8 @@ const status = computed(() => {
 const entryError = computed(() => {
   const diagnostic = data.value?.run?.state.entry_error
   if (!diagnostic || data.value?.run?.state.phase !== 'submitting') return ''
+  if (diagnostic.exchange_message) return `Resposta da corretora: ${diagnostic.exchange_message}`
+  if (diagnostic.response_code) return `Resposta da corretora sem confirmação (${diagnostic.response_code}).`
   if (['ConnectionError', 'ConnectTimeout', 'ReadTimeout', 'Timeout'].includes(diagnostic.type)) return 'Falha de rede durante o envio.'
   if (diagnostic.http_status) return `A API respondeu HTTP ${diagnostic.http_status} durante o envio.`
   return `Falha no envio: ${diagnostic.type}.`

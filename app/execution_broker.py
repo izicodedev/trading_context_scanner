@@ -1,5 +1,6 @@
 """Hyperliquid SDK adapter. Constructing it does not send orders."""
 import json
+import re
 import time
 from eth_account import Account
 from hyperliquid.exchange import Exchange
@@ -9,23 +10,45 @@ from .execution_engine import ExecutionBlocked
 from .account_balance import trading_balance
 
 
+class OrderResponseError(ExecutionBlocked):
+    """An exchange response with no usable one-order acknowledgement."""
+
+    def __init__(self, code, detail=None):
+        super().__init__('Resposta da ordem não confirmada; reconciliação necessária.')
+        self.code = code
+        # Exchange errors can include public addresses. Never persist raw SDK payloads.
+        if isinstance(detail, str):
+            detail = re.sub(r'0x[0-9a-fA-F]{16,}', '[endereço]', detail)
+            detail = re.sub(r'[^\x20-\x7EÀ-ÿ]', ' ', detail).strip()
+            self.detail = detail[:180] or None
+        else:
+            self.detail = None
+
+
 def parse_order(result):
-    if not isinstance(result, dict) or result.get('status') != 'ok':
-        raise ExecutionBlocked('A corretora não confirmou a solicitação.')
-    statuses = result.get('response', {}).get('data', {}).get('statuses', [])
-    if len(statuses) != 1:
-        raise ExecutionBlocked('Resposta de ordem ambígua.')
+    if not isinstance(result, dict):
+        raise OrderResponseError('invalid_payload')
+    if result.get('status') != 'ok':
+        raise OrderResponseError('exchange_error', result.get('response') or result.get('error'))
+    response = result.get('response')
+    data = response.get('data') if isinstance(response, dict) else None
+    statuses = data.get('statuses') if isinstance(data, dict) else None
+    if not isinstance(statuses, list) or len(statuses) != 1:
+        raise OrderResponseError('status_count')
     status = statuses[0]
     if not isinstance(status, dict):
-        raise ExecutionBlocked('Estado de ordem não confirmado.')
+        raise OrderResponseError('invalid_status')
     if 'filled' in status:
         fill = status['filled']
-        return dict(filled=float(fill['totalSz']), price=float(fill['avgPx']), resting=False)
+        try:
+            return dict(filled=float(fill['totalSz']), price=float(fill['avgPx']), resting=False)
+        except (TypeError, ValueError, KeyError):
+            raise OrderResponseError('invalid_fill') from None
     if 'resting' in status:
         return dict(filled=0, resting=True)
     if 'error' in status:
         return dict(filled=0, resting=False, rejected=True)
-    raise ExecutionBlocked('Resposta de ordem desconhecida.')
+    raise OrderResponseError('unknown_status')
 
 
 class Broker:

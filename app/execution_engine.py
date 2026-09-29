@@ -238,6 +238,14 @@ def step(broker, journal, config, state, active, now=None):
     except Exception as exc:
         # Keep only a safe diagnostic code; SDK exceptions may include signed payloads.
         diagnostic = {'type': type(exc).__name__}
+        response_code = getattr(exc, 'code', None)
+        if isinstance(response_code, str) and response_code in {
+            'invalid_payload', 'exchange_error', 'status_count', 'invalid_status', 'invalid_fill', 'unknown_status'
+        }:
+            diagnostic['response_code'] = response_code
+        response_detail = getattr(exc, 'detail', None)
+        if isinstance(response_detail, str):
+            diagnostic['exchange_message'] = response_detail
         status_code = getattr(exc, 'status_code', None)
         if type(status_code) is int and 400 <= status_code <= 599:
             diagnostic['http_status'] = status_code
