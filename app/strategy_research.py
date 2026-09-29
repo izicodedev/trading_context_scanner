@@ -30,7 +30,7 @@ def candidates():
     return output
 
 
-def select_strategies(frame, config: LabConfig):
+def select_strategies(frame, config: LabConfig, symbol: str = "BTCUSDT"):
     # Recent four days were already explored in earlier iterations; keep them out
     # of this expanded retrospective experiment when a month of data is available.
     excluded_recent = 1152 if len(frame) >= 6000 else 0
@@ -44,32 +44,41 @@ def select_strategies(frame, config: LabConfig):
     validation_start = frame.iloc[split].open_time
     scores = []
     for strategy in candidates():
-        result = replay(discovery, strategy, config, stop=True)
-        rank = (result["closed_trades"] >= 5,
-                result["total_return_pct"] - .5 * result["max_drawdown_pct"],
-                result["closed_trades"])
-        scores.append((strategy, result, rank))
-    selected, training, validation, assessments = [], [], [], []
-    families = sorted({item[0].key.rsplit("_", 1)[0] for item in scores})
-    family_winners = [max((item for item in scores if item[0].key.rsplit("_", 1)[0] == family), key=lambda item: item[2]) for family in families]
-    for strategy, train, _ in sorted(family_winners, key=lambda item: item[2], reverse=True)[:3]:
-        selected.append(strategy)
-        test = replay(frame, strategy, config, live_start=validation_start, stop=True)
-        training.append(train)
-        validation.append(test)
+        train = replay(discovery, strategy, config, stop=True, symbol=symbol)
+        test = replay(frame, strategy, config, live_start=validation_start, stop=True, symbol=symbol)
         enough = train["closed_trades"] >= 5 and test["closed_trades"] >= 15
-        positive = test["net_pnl"] > 0 and (test["profit_factor"] or 0) > 1
-        assessments.append(dict(key=strategy.key,
-                                status="insufficient_sample" if not enough else "promising" if positive else "not_confirmed",
-                                discovery_trades=train["closed_trades"], validation_trades=test["closed_trades"]))
+        qualified = (enough and train["net_pnl"] > 0 and test["net_pnl"] > 0
+                     and (train["profit_factor"] or 0) > 1 and (test["profit_factor"] or 0) > 1)
+        scores.append((strategy, train, test, qualified))
+    # Validation is used as a selection filter, so its result is a historical
+    # screen, not an untouched estimate of future performance. The forward
+    # paper session is the independent observation.
+    eligible = [item for item in scores if item[3]]
+    eligible.sort(key=lambda item: (item[2]["win_rate"] or 0,
+                                   item[2]["total_return_pct"], item[2]["closed_trades"]), reverse=True)
+    chosen = eligible[:3]
+    selected = [item[0] for item in chosen]
+    training = [item[1] for item in chosen]
+    validation = [item[2] for item in chosen]
+    assessments = [dict(key=strategy.key, status="promising",
+                        discovery_trades=train["closed_trades"], validation_trades=test["closed_trades"])
+                   for strategy, train, test, _ in chosen]
     fingerprint = sha256(frame.to_csv(index=False).encode()).hexdigest()
-    report = dict(method="70% descoberta / 30% validação temporal, seleção apenas na descoberta",
+    report = dict(method="70% descoberta / 30% triagem temporal; selecionar até três estratégias lucrativas nos dois períodos, ordenadas pelo acerto no segundo. O segundo período participa da seleção e não é prova independente.",
                   candidates_tested=len(scores), data_sha256=fingerprint,
+                  eligible_count=len(eligible),
+                  selection_message=(None if selected else
+                      "Nenhuma estratégia do catálogo teve lucro líquido e amostra suficiente nos dois períodos desta moeda. A coleta continua; escolha manualmente uma hipótese experimental ou reavalie com novos dados."),
                   excluded_recent_candles=excluded_recent,
                   discovery_start=frame.iloc[0].open_time.isoformat(),
                   discovery_end=frame.iloc[split - 1].close_time.isoformat(),
                   validation_start=validation_start.isoformat(), validation_end=frame.iloc[-1].close_time.isoformat(),
                   training=training, validation=validation, assessments=assessments,
-                  trials=[dict(strategy=asdict(s), discovery_return=r["total_return_pct"],
-                               discovery_drawdown=r["max_drawdown_pct"], trades=r["closed_trades"]) for s, r, _ in scores])
+                  trials=[dict(strategy=asdict(s), discovery_return=train["total_return_pct"],
+                               discovery_drawdown=train["max_drawdown_pct"],
+                               win_rate=train["win_rate"], trades=train["closed_trades"],
+                               validation_return=test["total_return_pct"],
+                               validation_win_rate=test["win_rate"],
+                               validation_trades=test["closed_trades"], qualified=qualified)
+                          for s, train, test, qualified in scores])
     return selected, report

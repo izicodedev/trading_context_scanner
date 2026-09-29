@@ -19,6 +19,10 @@ Todos os processos precisam do mesmo DATABASE_URL. A migration 003 adiciona
 strategy_sessions por usuário, com configuração, amostra histórica, estado,
 heartbeat e métricas JSONB. Nenhum deploy é realizado automaticamente.
 
+A migration 011 separa as sessões por usuário e moeda. O worker acompanha todas
+as sessões ativas de BTCUSDT e ETHUSDT independentemente da moeda exibida na
+tela. Veja [multi-market.md](multi-market.md) para importação e coleta contínua.
+
 GET/POST `/api/simulator/live` exigem autenticação e usam o usuário da sessão.
 POST recebe `{"active": true}` ou `{"active": false}`. A ativação é idempotente
 enquanto a sessão já estiver ativa. A parada encerra virtualmente as posições
@@ -62,7 +66,9 @@ fechados, não fills em ticks de mercado: são atualizados quando o candle entra
 O replay ao vivo conserva o início da amostra e suporta até 50.000 candles.
 Lacunas impedem o avanço, em vez de ocultar períodos desconhecidos. O resultado
 anterior permanece visível com erro. Depois de interrupções, completar o histórico
-permite recuperar a sessão. A importação recente não garante backfill de pausas longas.
+permite recuperar a sessão. O scanner tenta recompor candles fechados desde a
+última abertura gravada após uma pausa; lacunas na fonte geram erro e nova
+tentativa no ciclo seguinte.
 
 ## Custos e limitações
 

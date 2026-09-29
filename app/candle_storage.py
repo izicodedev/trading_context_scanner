@@ -60,6 +60,14 @@ def available_datasets() -> list[dict]:
         """).fetchall()
 
 
+def latest_open_time(symbol: str, timeframe: str = "5m"):
+    with _connect() as conn:
+        row = conn.execute("""SELECT MAX(open_time) AS open_time FROM market_candles
+            WHERE source=%s AND symbol=%s AND timeframe=%s AND close_time < NOW()""",
+            (MARKET_SOURCE, symbol, timeframe)).fetchone()
+        return row["open_time"]
+
+
 def load_candles(symbol: str, timeframe: str, entry_time: object, max_candles: int,
                  source: str = MARKET_SOURCE) -> pd.DataFrame:
     if timeframe not in TIMEFRAME_MINUTES:

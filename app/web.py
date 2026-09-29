@@ -6,8 +6,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request, send_from_directory, session
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import BadRequest
 
 from .config import settings
 from .db import ensure_signal_table, fetch_signal_rows, get_database_url
@@ -15,6 +16,8 @@ from .auth import auth_api, authenticated_user
 from .simulation_api import simulation_api
 from .hyperliquid_api import hyperliquid_api
 from .hyperliquid_setup import setup_api
+from .symbols import DEFAULT_SYMBOL, SYMBOLS, validate_symbol
+from .candle_storage import _connect
 
 
 def get_base_url() -> str:
@@ -99,10 +102,10 @@ def _read_csv(path: str | Path):
         return list(reader)
 
 
-def _read_postgres_rows(limit: int | None = None):
+def _read_postgres_rows(limit: int | None = None, symbol: str = DEFAULT_SYMBOL):
     if not get_database_url():
         return []
-    rows = fetch_signal_rows(limit=limit)
+    rows = fetch_signal_rows(limit=limit, symbol=symbol)
     for row in rows:
         value = row.get("timestamp")
         if hasattr(value, "isoformat"):
@@ -119,11 +122,12 @@ def _metric_or_none(value):
         return None
 
 
-def load_signal_rows():
+def load_signal_rows(symbol: str = DEFAULT_SYMBOL):
     if get_database_url():
-        rows = _read_postgres_rows()
+        rows = _read_postgres_rows(symbol=symbol)
     else:
-        rows = _read_csv(DATA_DIR / "signals.csv")
+        path = DATA_DIR / ("signals.csv" if symbol == DEFAULT_SYMBOL else f"signals_{symbol}.csv")
+        rows = _read_csv(path)
 
     for row in rows:
         row["timestamp_dt"] = parse_timestamp(row.get("timestamp"))
@@ -148,8 +152,9 @@ def load_signal_rows():
     return rows
 
 
-def load_evaluation_rows():
-    rows = _read_csv(DATA_DIR / "signal_evaluation.csv")
+def load_evaluation_rows(symbol: str = DEFAULT_SYMBOL):
+    path = DATA_DIR / ("signal_evaluation.csv" if symbol == DEFAULT_SYMBOL else f"signal_evaluation_{symbol}.csv")
+    rows = _read_csv(path)
     for row in rows:
         row["signal_timestamp_dt"] = parse_timestamp(row.get("signal_timestamp"))
         for key in [
@@ -187,10 +192,10 @@ def _status_label_from_seconds(seconds: float | None):
     return "ONLINE" if seconds < 600 else "OFFLINE"
 
 
-def build_status_payload():
-    signals = load_signal_rows()
+def build_status_payload(symbol: str = DEFAULT_SYMBOL):
+    signals = load_signal_rows(symbol)
     last_signal = signals[-1] if signals else {}
-    last_mtime = _latest_file_mtime(DATA_DIR / "signals.csv")
+    last_mtime = _latest_file_mtime(DATA_DIR / ("signals.csv" if symbol == DEFAULT_SYMBOL else f"signals_{symbol}.csv"))
     now = datetime.now(timezone.utc)
     last_time = parse_timestamp(last_signal.get("timestamp"))
     if last_time and last_time.tzinfo is None:
@@ -199,7 +204,7 @@ def build_status_payload():
     return {
         "scanner_status": _status_label_from_seconds(status_seconds),
         "last_update": last_signal.get("timestamp") or "N/D",
-        "market": settings.symbol,
+        "market": symbol,
         "timeframe": f"{settings.context_interval}/{settings.structure_interval}/{settings.trigger_interval}",
         "threshold": settings.min_score,
         "price": last_signal.get("price") or "N/D",
@@ -217,14 +222,14 @@ def build_status_payload():
     }
 
 
-def build_history_payload(limit: int = 200):
-    rows = load_signal_rows()
+def build_history_payload(limit: int = 200, symbol: str = DEFAULT_SYMBOL):
+    rows = load_signal_rows(symbol)
     rows = sorted(rows, key=lambda r: r.get("timestamp_dt") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     return rows[:limit]
 
 
-def build_components_payload():
-    rows = load_signal_rows()
+def build_components_payload(symbol: str = DEFAULT_SYMBOL):
+    rows = load_signal_rows(symbol)
     if not rows:
         return []
 
@@ -256,8 +261,8 @@ def build_components_payload():
     return summary
 
 
-def build_entries_payload():
-    rows = load_signal_rows()
+def build_entries_payload(symbol: str = DEFAULT_SYMBOL):
+    rows = load_signal_rows(symbol)
     entries = []
     for row in rows:
         if str(row.get("entry_state", "")).upper() == "ENTRY":
@@ -265,9 +270,37 @@ def build_entries_payload():
     return entries
 
 
-def build_evaluation_payload():
-    rows = load_evaluation_rows()
+def build_evaluation_payload(symbol: str = DEFAULT_SYMBOL):
+    rows = load_evaluation_rows(symbol)
     return rows
+
+
+def requested_symbol():
+    try:
+        return validate_symbol(request.args.get("symbol", DEFAULT_SYMBOL))
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+
+
+@app.route("/api/market/selection", methods=["GET", "POST"])
+@authenticated_user
+def api_market_selection():
+    if request.method == "POST":
+        payload = request.get_json(silent=True)
+        try:
+            symbol = validate_symbol(payload.get("symbol") if isinstance(payload, dict) else None)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        with _connect() as conn:
+            conn.execute("""INSERT INTO user_market_preferences(user_id,symbol) VALUES(%s,%s)
+                ON CONFLICT(user_id) DO UPDATE SET symbol=EXCLUDED.symbol,updated_at=NOW()""",
+                (session["user_id"], symbol))
+    else:
+        with _connect() as conn:
+            row = conn.execute("SELECT symbol FROM user_market_preferences WHERE user_id=%s",
+                               (session["user_id"],)).fetchone()
+            symbol = row["symbol"] if row else DEFAULT_SYMBOL
+    return jsonify(symbol=symbol, available_symbols=SYMBOLS)
 
 
 @app.route("/")
@@ -279,46 +312,47 @@ def index():
 @app.route("/api/status")
 @authenticated_user
 def api_status():
-    return jsonify(build_status_payload())
+    return jsonify(build_status_payload(requested_symbol()))
 
 
 @app.route("/api/history")
 @authenticated_user
 def api_history():
     limit = max(1, min(500, int(request.args.get("limit", 200))))
-    return jsonify(build_history_payload(limit=limit))
+    return jsonify(build_history_payload(limit=limit, symbol=requested_symbol()))
 
 
 @app.route("/api/components")
 @authenticated_user
 def api_components():
-    return jsonify(build_components_payload())
+    return jsonify(build_components_payload(requested_symbol()))
 
 
 @app.route("/api/entries")
 @authenticated_user
 def api_entries():
-    return jsonify(build_entries_payload())
+    return jsonify(build_entries_payload(requested_symbol()))
 
 
 @app.route("/api/evaluation")
 @authenticated_user
 def api_evaluation():
-    return jsonify(build_evaluation_payload())
+    return jsonify(build_evaluation_payload(requested_symbol()))
 
 
 @app.route("/api/summary")
 @authenticated_user
 def api_summary():
-    rows = load_signal_rows()
+    symbol = requested_symbol()
+    rows = load_signal_rows(symbol)
     summary = defaultdict(float)
     for row in rows:
         summary["price"] = float(row.get("price_float") or summary["price"] or 0.0)
         summary["score"] = float(row.get("score_int") or summary["score"] or 0.0)
     return jsonify({
         "total_rows": len(rows),
-        "status": build_status_payload(),
-        "components": build_components_payload(),
+        "status": build_status_payload(symbol),
+        "components": build_components_payload(symbol),
     })
 
 

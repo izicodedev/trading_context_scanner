@@ -10,7 +10,7 @@ SIGNAL_TABLE = "signals"
 SIGNAL_COLUMNS = [
     "timestamp", "side", "score", "price", "entry", "stop", "target", "reasons",
     "long_score", "short_score", "ema21", "ema50", "rsi", "atr", "vol_ratio",
-    "trend_bias", "signal_state", "setup_state", "entry_state",
+    "trend_bias", "signal_state", "setup_state", "entry_state", "symbol",
     "long_trend_ema_active", "long_price_above_ema_active", "long_rsi_favorable_active",
     "long_rsi_extreme_active", "long_volume_confirmation_active", "long_fib_active",
     "long_liquidity_sweep_active", "long_structure_active", "short_trend_ema_active",
@@ -108,7 +108,8 @@ def seed_master_user(login: str, name: str, password_hash: str) -> dict[str, Any
     return result
 
 
-def fetch_signal_rows(limit: int | None = None, database_url: str | None = None) -> list[dict[str, Any]]:
+def fetch_signal_rows(limit: int | None = None, database_url: str | None = None,
+                      symbol: str = "BTCUSDT") -> list[dict[str, Any]]:
     url = database_url or get_database_url()
     if not url:
         return []
@@ -120,11 +121,11 @@ def fetch_signal_rows(limit: int | None = None, database_url: str | None = None)
     conn = psycopg.connect(url)
     try:
         ensure_signal_table(conn)
-        sql = "SELECT * FROM signals ORDER BY timestamp DESC"
-        params: list[Any] = []
+        sql = "SELECT * FROM signals WHERE symbol=%s ORDER BY timestamp DESC"
+        params: list[Any] = [symbol]
         if limit is not None:
-            sql = "SELECT * FROM signals ORDER BY timestamp DESC LIMIT %s"
-            params = [limit]
+            sql += " LIMIT %s"
+            params.append(limit)
         with conn.cursor() as cur:
             cur.execute(sql, params)
             columns = [desc[0] for desc in cur.description]
@@ -195,7 +196,9 @@ def signals_table_sql() -> str:
         "entry_state TEXT",
     ]
     for field in SIGNAL_COLUMNS[19:]:
-        if field.endswith("_active"):
+        if field == "symbol":
+            columns.append("symbol TEXT NOT NULL DEFAULT 'BTCUSDT'")
+        elif field.endswith("_active"):
             columns.append(f"{field} BOOLEAN")
         elif field.endswith("_points"):
             columns.append(f"{field} INTEGER")
@@ -210,6 +213,8 @@ def signals_table_sql() -> str:
 def ensure_signal_table(conn) -> None:
     with conn.cursor() as cur:
         cur.execute(signals_table_sql())
+        cur.execute("ALTER TABLE signals ADD COLUMN IF NOT EXISTS symbol TEXT NOT NULL DEFAULT 'BTCUSDT'")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_signals_symbol_timestamp ON signals(symbol, timestamp DESC)")
         cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SIGNAL_TABLE}_timestamp ON {SIGNAL_TABLE} (timestamp)")
         cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SIGNAL_TABLE}_side ON {SIGNAL_TABLE} (side)")
         cur.execute(f"CREATE INDEX IF NOT EXISTS idx_{SIGNAL_TABLE}_score ON {SIGNAL_TABLE} (score)")
@@ -230,7 +235,7 @@ def row_to_signal_record(row: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def signal_record_from_signal(signal: Any) -> dict[str, Any]:
+def signal_record_from_signal(signal: Any, symbol: str = "BTCUSDT") -> dict[str, Any]:
     row = {
         "timestamp": signal.timestamp,
         "side": signal.side,
@@ -251,6 +256,7 @@ def signal_record_from_signal(signal: Any) -> dict[str, Any]:
         "signal_state": signal.signal_state,
         "setup_state": signal.setup_state,
         "entry_state": signal.entry_state,
+        "symbol": symbol,
     }
     for key, comp in getattr(signal, "long_components", {}).items():
         row[f"{key}_active"] = bool(comp.active)

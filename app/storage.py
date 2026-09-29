@@ -71,7 +71,7 @@ def _legacy_csv_save(signal: Signal, path: str):
         writer.writerow({k: row.get(k, "") for k in FIELDS})
 
 
-def _db_save(signal: Signal):
+def _db_save(signal: Signal, symbol: str):
     try:
         import psycopg
     except ImportError as exc:
@@ -84,7 +84,7 @@ def _db_save(signal: Signal):
     conn = psycopg.connect(database_url)
     try:
         ensure_signal_table(conn)
-        record = signal_record_from_signal(signal)
+        record = signal_record_from_signal(signal, symbol)
         insert_signal_record(conn, record)
     finally:
         conn.close()
@@ -131,10 +131,10 @@ def ensure_signal_schema(path: str):
             writer.writerow({key: row.get(key, "") for key in merged_fields})
 
 
-def save(signal: Signal, path: str | None = None):
+def save(signal: Signal, path: str | None = None, symbol: str = "BTCUSDT"):
     validate_component_totals(signal)
     if get_database_url():
-        _db_save(signal)
+        _db_save(signal, symbol)
         return
     if path is None:
         raise RuntimeError("CSV path is required when DATABASE_URL is not configured")

@@ -1,6 +1,6 @@
 # Trading Context Scanner
 
-Local Python scanner for BTC/USDT using Binance public market data. It generates LONG/SHORT/WAIT context scores from trend, momentum, volume, volatility, Fibonacci pullback, liquidity sweeps and support/resistance.
+Local Python scanner for BTC/USDT and ETH/USDT using Binance public market data. It generates LONG/SHORT/WAIT context scores from trend, momentum, volume, volatility, Fibonacci pullback, liquidity sweeps and support/resistance.
 
 ## Run
 
@@ -11,4 +11,4 @@ pip install -r requirements.txt
 python -m app.main
 ```
 
-The scanner writes signals to `data/signals.csv` and logs to `logs/scanner.log`.
+With `DATABASE_URL`, the scanner stores signals and closed candles separately for both symbols in PostgreSQL and fills gaps after downtime. Without a database, it writes separate signal CSV files. See [multi-market setup](docs/multi-market.md).
