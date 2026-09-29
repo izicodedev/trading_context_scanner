@@ -2,6 +2,9 @@
 import json
 import re
 import time
+from datetime import timezone
+from email.utils import parsedate_to_datetime
+from urllib.request import Request, urlopen
 from eth_account import Account
 from hyperliquid.exchange import Exchange
 from hyperliquid.utils.types import Cloid
@@ -29,7 +32,11 @@ def parse_order(result):
     if not isinstance(result, dict):
         raise OrderResponseError('invalid_payload')
     if result.get('status') != 'ok':
-        raise OrderResponseError('exchange_error', result.get('response') or result.get('error'))
+        detail = result.get('response') or result.get('error')
+        if isinstance(detail, str) and detail.strip() == 'Action already expired':
+            # The exchange explicitly rejected this signed action before acceptance.
+            return dict(filled=0, resting=False, rejected=True, reason='action_expired')
+        raise OrderResponseError('exchange_error', detail)
     response = result.get('response')
     data = response.get('data') if isinstance(response, dict) else None
     statuses = data.get('statuses') if isinstance(data, dict) else None
@@ -62,8 +69,24 @@ class Broker:
         self.owner = config['account_address']
         self.agent = config['agent_address']
         url = 'https://api.hyperliquid.xyz' if config['network'] == 'mainnet' else 'https://api.hyperliquid-testnet.xyz'
+        self.url = url
         self.exchange = Exchange(wallet, url, account_address=self.owner, timeout=10)
         self.info = self.exchange.info
+
+    def check_clock(self):
+        """Refuse signed actions when the VPS clock differs from the exchange API."""
+        request = Request(self.url + '/info', data=b'{"type":"meta"}',
+                          headers={'Content-Type': 'application/json'})
+        try:
+            with urlopen(request, timeout=5) as response:
+                date_header = response.headers.get('Date')
+            server_time = parsedate_to_datetime(date_header)
+            if server_time.tzinfo is None:
+                server_time = server_time.replace(tzinfo=timezone.utc)
+        except (OSError, TypeError, ValueError) as exc:
+            raise ExecutionBlocked('Não foi possível verificar o relógio da VPS com a Hyperliquid; nenhuma ordem enviada.') from exc
+        if abs(time.time() - server_time.timestamp()) > 5:
+            raise ExecutionBlocked('Relógio da VPS fora de sincronia com a Hyperliquid; nenhuma ordem enviada.')
 
     def authorized(self):
         now = time.time() * 1000

@@ -21,6 +21,7 @@ class Broker:
     def daily(self, since): return [], []
     def candles(self, now): return []
     def market(self): return 10000, 5, 40
+    def check_clock(self): pass
     def leverage(self, leverage): self.sent.append(('leverage', leverage))
     def entry(self, cloid, **args):
         self.sent.append(('entry', args))
@@ -109,6 +110,25 @@ def test_entry_exchange_reason_is_preserved_without_retry(signal):
     assert state['phase'] == 'submitting'
 
 
+def test_expired_action_is_definitive_rejection_and_stops_new_entries(signal):
+    b,j,state=Broker(),Journal(),{'phase':'waiting'}
+    b.entry=lambda *args,**kwargs: parse_order({'status':'err','response':'Action already expired'})
+    engine.step(b,j,config(),state,True,2000)
+    assert state['phase']=='waiting' and state['pause_entries']
+    assert 'rejeitada' in state['message']
+    assert not any(kind in ('entry','protect','close') for kind,_ in b.sent)
+    assert len(j.keys)==1
+
+
+def test_clock_skew_blocks_before_journal_or_leverage(signal):
+    b,j,state=Broker(),Journal(),{'phase':'waiting'}
+    b.check_clock=lambda: (_ for _ in ()).throw(engine.ExecutionBlocked('Relógio fora de sincronia'))
+    with pytest.raises(engine.ExecutionBlocked, match='Relógio'):
+        engine.step(b,j,config(),state,True,2000)
+    assert state['phase']=='waiting' and state['pause_entries']
+    assert not j.keys and not b.sent
+
+
 def test_sdk_entry_sends_ioc_at_supplied_limit_without_price_lookup():
     from app.execution_broker import Broker as SdkBroker
     class Exchange:
@@ -170,6 +190,23 @@ def test_exchange_error_is_redacted_for_diagnostics():
         parse_order({'status':'err','response':f'L1 error: API wallet {address} expired'})
     assert error.value.code == 'exchange_error'
     assert error.value.detail == 'L1 error: API wallet [endereço] expired'
+
+
+def test_broker_clock_check_uses_exchange_date(monkeypatch):
+    import app.execution_broker as module
+    from email.utils import formatdate
+    class Response:
+        def __init__(self, timestamp): self.headers={'Date':formatdate(timestamp, usegmt=True)}
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    broker=module.Broker.__new__(module.Broker)
+    broker.url='https://api.hyperliquid.xyz'
+    monkeypatch.setattr(module.time,'time',lambda: 1_700_000_000)
+    monkeypatch.setattr(module,'urlopen',lambda request,timeout: Response(1_700_000_000))
+    broker.check_clock()
+    monkeypatch.setattr(module,'urlopen',lambda request,timeout: Response(1_700_000_052))
+    with pytest.raises(engine.ExecutionBlocked,match='fora de sincronia'):
+        broker.check_clock()
 
 
 def test_networks_disabled_by_default(monkeypatch):

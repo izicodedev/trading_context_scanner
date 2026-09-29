@@ -1,6 +1,6 @@
 # Correções do executor e preparação da VPS
 
-Alterações locais; nenhum deploy nem operação real de teste foi feito.
+Checklist operacional para o executor de ordens reais.
 
 ## Recuperação
 
@@ -32,6 +32,13 @@ Alterações locais; nenhum deploy nem operação real de teste foi feito.
 5. Verificar inicialização, reinício, logs, HTTPS e leitura de saldo na VPS.
    Systemd/Gunicorn/Nginx não foram executados neste ambiente Windows.
 6. Validar o ciclo completo na corretora antes de operar sem supervisão.
+7. Manter o relógio da VPS sincronizado. O executor compara a hora local com o
+   cabeçalho `Date` da API da Hyperliquid antes de cada entrada e saída; desvio
+   superior a cinco segundos bloqueia a ordem. Uma resposta explícita
+   `Action already expired` encerra a tentativa sem reenvio e para novas entradas.
+   Corrigir a sincronização de hora antes de iniciar outra sessão. Se o NTP
+   permanecer sem resposta, verificar conectividade de saída UDP 123 com o
+   provedor da VPS; um acerto manual do relógio não substitui NTP contínuo.
 
 Desabilitar novas entradas no servidor não interrompe a recuperação de uma
 posição já gerenciada. O botão Parar novas entradas também mantém essa gestão.

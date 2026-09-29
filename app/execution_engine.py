@@ -97,6 +97,7 @@ def close_remaining(broker, journal, state, position, now):
         return
     if now < state.get('next_close_at', 0):
         return
+    broker.check_clock()
     attempt = state.get('close_attempt', 0) + 1
     key = f"close:{state['entry_cloid']}:{attempt}"
     state.update(phase='closing', close_pending=key, close_attempt=attempt,
@@ -258,6 +259,12 @@ def step(broker, journal, config, state, active, now=None):
     distance = max(strategy.stop_floor * price, atr * strategy.atr_multiple)
     if not math.isfinite(distance) or distance <= 0 or distance / price >= .8 / leverage:
         raise ExecutionBlocked('Stop incompatível com a alavancagem configurada.')
+    try:
+        broker.check_clock()
+    except ExecutionBlocked:
+        state['pause_entries'] = True
+        journal.save(state)
+        raise
     broker.leverage(leverage)
     entry_limit = price_round(price * (1.001 if side == 'LONG' else .999), decimals)
     cloid = journal.cloid('entry:' + str(candle))
@@ -283,6 +290,11 @@ def step(broker, journal, config, state, active, now=None):
         state['entry_error'] = diagnostic
         raise
     if result['filled'] == 0:
+        if result.get('rejected'):
+            state.update(phase='waiting', pause_entries=True,
+                         message='Entrada rejeitada pela Hyperliquid; novas entradas paradas. Confira o relógio da VPS.')
+            journal.save(state)
+            return state
         if result.get('resting'):
             raise ExecutionBlocked('Entrada inesperadamente pendente. Confira a ordem na Hyperliquid.')
         state.update(phase='waiting', message='Entrada não executada.')

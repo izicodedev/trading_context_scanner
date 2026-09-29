@@ -120,6 +120,18 @@ def test_management_does_not_require_spot_balance(monkeypatch):
     assert b.sent[0][0] == 'close'
 
 
+def test_clock_skew_blocks_close_before_journal_and_can_retry_after_fix():
+    b, j, state = Broker(), Journal(), closing()
+    b.positions = [dict(coin='BTC', szi='.01')]
+    b.check_clock = lambda: (_ for _ in ()).throw(ExecutionBlocked('Relógio fora de sincronia'))
+    with pytest.raises(ExecutionBlocked, match='Relógio'):
+        step(b, j, config(), state, False, 1000)
+    assert state['phase'] == 'closing' and not j.keys and not b.sent
+    b.check_clock = lambda: None
+    step(b, j, config(), state, False, 2000)
+    assert [kind for kind, _ in b.sent] == ['close']
+
+
 @pytest.mark.parametrize('position', [None, {'coin': 'BTC', 'szi': '.005'}])
 def test_emergency_endpoint_stops_entries_before_lookup_and_ticks_only_with_position(monkeypatch, position):
     from contextlib import contextmanager
