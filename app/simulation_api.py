@@ -9,15 +9,62 @@ from .auth import authenticated_user
 from .trade_simulator import SimulationConfig, TradeSimulator, TradeSpec, _validate_spec
 from .candle_storage import available_datasets, load_candles, MARKET_SOURCE
 from . import lab_service
+from . import user_strategies
+from .symbols import DEFAULT_SYMBOL, validate_symbol
 
 simulation_api = Blueprint("simulation_api", __name__)
+
+
+@simulation_api.get("/api/simulator/strategies")
+@authenticated_user
+def strategy_catalog():
+    try:
+        symbol = validate_symbol(request.args.get("symbol", DEFAULT_SYMBOL))
+        return jsonify(user_strategies.catalog(session["user_id"], symbol))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except (psycopg.Error, RuntimeError):
+        return jsonify(error="Catálogo indisponível. Verifique o banco e as migrations."), 503
+
+
+@simulation_api.post("/api/simulator/strategies")
+@authenticated_user
+def create_strategy():
+    if request.content_length is not None and request.content_length > 4096:
+        return jsonify(error="A estratégia excede o limite de 4 KB."), 413
+    try:
+        strategy = user_strategies.create(session["user_id"], request.get_json(silent=True))
+        return jsonify(strategy), 201
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except (psycopg.Error, RuntimeError):
+        return jsonify(error="Não foi possível salvar a estratégia."), 503
+
+
+@simulation_api.post("/api/simulator/selection")
+@authenticated_user
+def select_simulation_strategies():
+    payload = request.get_json(silent=True)
+    try:
+        if not isinstance(payload, dict) or not set(payload).issubset({"strategy_keys", "symbol"}) or "strategy_keys" not in payload:
+            raise ValueError("Envie a lista de estratégias selecionadas.")
+        symbol = validate_symbol(payload.get("symbol", DEFAULT_SYMBOL))
+        keys = user_strategies.choose(session["user_id"], payload["strategy_keys"], symbol)
+        return jsonify(selected_keys=keys)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except (psycopg.Error, RuntimeError):
+        return jsonify(error="Não foi possível salvar a seleção."), 503
 
 
 @simulation_api.get("/api/simulator/live")
 @authenticated_user
 def live_status():
     try:
-        return jsonify(lab_service.status(session["user_id"]))
+        symbol = validate_symbol(request.args.get("symbol", DEFAULT_SYMBOL))
+        return jsonify(lab_service.status(session["user_id"], symbol))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
     except (psycopg.Error, RuntimeError):
         return jsonify(error="Simulação indisponível. Verifique o banco e as migrations."), 503
 
@@ -29,11 +76,12 @@ def live_control():
     if not isinstance(payload, dict) or type(payload.get("active")) is not bool:
         return jsonify(error="Informe active como true ou false."), 400
     try:
+        symbol = validate_symbol(payload.get("symbol", DEFAULT_SYMBOL))
         if payload["active"]:
-            lab_service.start(session["user_id"])
+            lab_service.start(session["user_id"], symbol)
         else:
-            lab_service.advance(session["user_id"], stopping=True)
-        return jsonify(lab_service.status(session["user_id"]))
+            lab_service.advance(session["user_id"], stopping=True, symbol=symbol)
+        return jsonify(lab_service.status(session["user_id"], symbol))
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
     except (psycopg.Error, RuntimeError):

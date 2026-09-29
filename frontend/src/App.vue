@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { getAuthSession, getComponents, getEntries, getEvaluation, getHistory, getStatus, signOut } from './services/api'
+import { getAuthSession, getComponents, getEntries, getEvaluation, getHistory, getStatus, getMarketSelection, saveMarketSelection, signOut, type MarketSymbol } from './services/api'
 import type { ComponentSummary, EvaluationRow, SignalRow, StatusPayload } from './types/api'
 import InfoPopover from './components/InfoPopover.vue'
 import LoginView from './views/LoginView.vue'
@@ -14,6 +14,8 @@ const returnPath = ref(isHyperliquidRoute.value ? '/hyperliquid' : isSimulatorRo
 const isAuthenticated = ref(false)
 const authReady = ref(false)
 const authError = ref('')
+const selectedSymbol = ref<MarketSymbol>('BTCUSDT')
+const symbolBusy = ref(false)
 
 const status = ref<StatusPayload | null>(null)
 const history = ref<SignalRow[]>([])
@@ -109,8 +111,11 @@ const latestEvaluation = computed(() => evaluation.value[evaluation.value.length
 const longScoreValue = computed(() => toNumber((latestHistory.value?.long_score as string | number | undefined) ?? status.value?.long_score) ?? 0)
 const shortScoreValue = computed(() => toNumber((latestHistory.value?.short_score as string | number | undefined) ?? status.value?.short_score) ?? 0)
 
-const longPercent = computed(() => Math.min(100, (longScoreValue.value / scoreThreshold.value) * 100))
-const shortPercent = computed(() => Math.min(100, (shortScoreValue.value / scoreThreshold.value) * 100))
+const rankedScores = computed(() => [
+  { side: 'LONG', score: longScoreValue.value, bar: 'long' },
+  { side: 'SHORT', score: shortScoreValue.value, bar: 'short' },
+].sort((a, b) => b.score - a.score))
+const scorePercent = (score: number) => Math.min(100, (score / scoreThreshold.value) * 100)
 
 const timeframeParts = computed(() => (status.value?.timeframe ?? '').split('/').map((part) => part.trim()).filter(Boolean))
 const contextTimeframe = computed(() => timeframeParts.value[0]?.toUpperCase() ?? 'N/D')
@@ -135,7 +140,14 @@ const currentComponentValue = (name: string): number | null => {
   return toNumber(latestHistory.value?.[`${name}_value`] as number | string | null | undefined)
 }
 
-const visibleComponents = computed(() => components.value.filter((item) => isComponentEnabled(item.name)))
+const visibleComponents = computed(() => components.value
+  .filter((item) => isComponentEnabled(item.name))
+  .sort((a, b) => {
+    const activeRank = (name: string) => currentComponentActive(name) === true ? 2 : currentComponentActive(name) === false ? 1 : 0
+    return activeRank(b.name) - activeRank(a.name)
+      || (currentComponentPoints(b.name) ?? 0) - (currentComponentPoints(a.name) ?? 0)
+      || a.name.localeCompare(b.name)
+  }))
 
 const componentInfo = (name: string) => {
   const direction = name.startsWith('long_') ? 'LONG' : 'SHORT'
@@ -214,14 +226,16 @@ const alertEntry = computed(() => {
 })
 
 const loadData = async () => {
+  const symbol = selectedSymbol.value
   try {
     const [statusPayload, historyPayload, componentsPayload, entriesPayload, evaluationPayload] = await Promise.all([
-      getStatus(),
-      getHistory(200),
-      getComponents(),
-      getEntries(),
-      getEvaluation(),
+      getStatus(symbol),
+      getHistory(200, symbol),
+      getComponents(symbol),
+      getEntries(symbol),
+      getEvaluation(symbol),
     ])
+    if (symbol !== selectedSymbol.value) return
 
     status.value = statusPayload
     history.value = historyPayload
@@ -237,6 +251,24 @@ const loadData = async () => {
   } finally {
     isLoading.value = false
   }
+}
+
+const changeSymbol = async (event: Event) => {
+  const target = event.target as HTMLSelectElement
+  const next = target.value as MarketSymbol
+  const previous = selectedSymbol.value
+  if (next === previous || symbolBusy.value) return
+  symbolBusy.value = true
+  try {
+    await saveMarketSelection(next)
+    selectedSymbol.value = next
+    status.value = null; history.value = []; components.value = []; entries.value = []; evaluation.value = []
+    isLoading.value = true
+    await loadData()
+  } catch (reason) {
+    target.value = previous
+    authError.value = reason instanceof Error ? reason.message : 'Não foi possível selecionar a moeda.'
+  } finally { symbolBusy.value = false }
 }
 
 let intervalId: number | undefined
@@ -264,6 +296,7 @@ const handleAuthenticated = () => {
   isAuthenticated.value = true
   authError.value = ''
   navigateTo(returnPath.value)
+  void getMarketSelection().then(data => { selectedSymbol.value = data.symbol; void loadData() }).catch(() => {})
   startDashboardPolling()
 }
 
@@ -305,7 +338,10 @@ onMounted(async () => {
     } else if (auth.authenticated && isLoginRoute.value) {
       navigateTo('/', true)
     }
-    if (auth.authenticated) startDashboardPolling()
+    if (auth.authenticated) {
+      try { selectedSymbol.value = (await getMarketSelection()).symbol } catch { /* Preferência indisponível; usar BTC. */ }
+      startDashboardPolling()
+    }
   } catch (error) {
     console.error('Não foi possível validar a sessão', error)
     if (!isLoginRoute.value) navigateTo('/login', true)
@@ -335,6 +371,11 @@ onBeforeUnmount(() => {
         </nav>
       </div>
       <div class="status-wrap">
+        <label class="market-picker">Moeda
+          <select :value="selectedSymbol" :disabled="symbolBusy" aria-label="Moeda acompanhada" @change="changeSymbol">
+            <option value="BTCUSDT">BTC / USDT</option><option value="ETHUSDT">ETH / USDT</option>
+          </select>
+        </label>
         <span v-if="!isSimulatorRoute && !isHyperliquidRoute" class="status-badge" :class="status?.scanner_status === 'ONLINE' ? 'online' : 'offline'">
           {{ status?.scanner_status || 'OFFLINE' }}
         </span>
@@ -347,8 +388,8 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <HyperliquidView v-if="isHyperliquidRoute" />
-    <SimulatorView v-else-if="isSimulatorRoute" />
+    <HyperliquidView v-if="isHyperliquidRoute" :symbol="selectedSymbol" />
+    <SimulatorView v-else-if="isSimulatorRoute" :symbol="selectedSymbol" />
     <main v-else-if="!isLoading" class="content">
       <section class="market-overview panel" aria-label="Contexto atual do mercado">
         <div class="market-overview__price">
@@ -468,22 +509,13 @@ onBeforeUnmount(() => {
               <p>Threshold atual: {{ scoreThreshold }} pontos. A regra de entrada exige também que o score escolhido supere o oposto por mais de 5 pontos. Atingir o threshold não garante trade nem resultado.</p>
             </InfoPopover>
           </div>
-          <div class="score-row">
+          <div v-for="item in rankedScores" :key="item.side" class="score-row">
             <div class="score-label-group">
-              <span>LONG</span>
-              <strong>{{ longScoreValue }} / {{ scoreThreshold }}</strong>
+              <span>{{ item.side }}</span>
+              <strong>{{ item.score }} / {{ scoreThreshold }}</strong>
             </div>
-            <div class="bar-track" role="meter" aria-label="Score LONG" :aria-valuenow="Math.min(longScoreValue, scoreThreshold)" :aria-valuemin="0" :aria-valuemax="scoreThreshold">
-              <div class="bar long" :style="{ width: `${longPercent}%` }" />
-            </div>
-          </div>
-          <div class="score-row">
-            <div class="score-label-group">
-              <span>SHORT</span>
-              <strong>{{ shortScoreValue }} / {{ scoreThreshold }}</strong>
-            </div>
-            <div class="bar-track" role="meter" aria-label="Score SHORT" :aria-valuenow="Math.min(shortScoreValue, scoreThreshold)" :aria-valuemin="0" :aria-valuemax="scoreThreshold">
-              <div class="bar short" :style="{ width: `${shortPercent}%` }" />
+            <div class="bar-track" role="meter" :aria-label="`Score ${item.side}`" :aria-valuenow="Math.min(item.score, scoreThreshold)" :aria-valuemin="0" :aria-valuemax="scoreThreshold">
+              <div class="bar" :class="item.bar" :style="{ width: `${scorePercent(item.score)}%` }" />
             </div>
           </div>
         </div>
@@ -539,7 +571,7 @@ onBeforeUnmount(() => {
                 <p>Os pontos exibidos são do último ciclo. “Ativações no histórico” é a contagem agregada informada pela API e não representa o estado atual do componente.</p>
               </InfoPopover>
             </div>
-            <span class="small-note">Estado do último ciclo · preferências visuais locais</span>
+            <span class="small-note">Condições satisfeitas primeiro · mais pontos no topo</span>
           </div>
         </div>
 

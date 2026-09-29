@@ -57,24 +57,29 @@ export function signOut(): Promise<void> {
   return postJson<void>('/auth/logout');
 }
 
-export function getStatus(): Promise<StatusPayload> {
-  return getJson<StatusPayload>('/status');
+export type MarketSymbol = 'BTCUSDT' | 'ETHUSDT';
+export interface MarketSelection { symbol: MarketSymbol; available_symbols: MarketSymbol[] }
+export const getMarketSelection = () => getJson<MarketSelection>('/market/selection');
+export const saveMarketSelection = (symbol: MarketSymbol) => postJson<MarketSelection>('/market/selection', { symbol });
+
+export function getStatus(symbol: MarketSymbol = 'BTCUSDT'): Promise<StatusPayload> {
+  return getJson<StatusPayload>(`/status?symbol=${symbol}`);
 }
 
-export function getHistory(limit = 200): Promise<SignalRow[]> {
-  return getJson<SignalRow[]>(`/history?limit=${limit}`);
+export function getHistory(limit = 200, symbol: MarketSymbol = 'BTCUSDT'): Promise<SignalRow[]> {
+  return getJson<SignalRow[]>(`/history?limit=${limit}&symbol=${symbol}`);
 }
 
-export function getComponents(): Promise<ComponentSummary[]> {
-  return getJson<ComponentSummary[]>('/components');
+export function getComponents(symbol: MarketSymbol = 'BTCUSDT'): Promise<ComponentSummary[]> {
+  return getJson<ComponentSummary[]>(`/components?symbol=${symbol}`);
 }
 
-export function getEntries(): Promise<SignalRow[]> {
-  return getJson<SignalRow[]>('/entries');
+export function getEntries(symbol: MarketSymbol = 'BTCUSDT'): Promise<SignalRow[]> {
+  return getJson<SignalRow[]>(`/entries?symbol=${symbol}`);
 }
 
-export function getEvaluation(): Promise<EvaluationRow[]> {
-  return getJson<EvaluationRow[]>('/evaluation');
+export function getEvaluation(symbol: MarketSymbol = 'BTCUSDT'): Promise<EvaluationRow[]> {
+  return getJson<EvaluationRow[]>(`/evaluation?symbol=${symbol}`);
 }
 
 export function getSummary(): Promise<SummaryPayload> {
@@ -118,7 +123,21 @@ export function getCandleDatasets(): Promise<CandleDataset[]> {
 export interface LabStrategy {
   key: string; name: string; description: string; leverage: number;
   stop_floor: number; atr_multiple: number; reward_risk: number; max_candles: number; threshold?: number;
+  entry_rule?: string | null; direction?: 'BOTH' | 'LONG' | 'SHORT'; ema_filter?: boolean;
+  volume_min?: number; rsi_lower?: number; rsi_upper?: number;
+  entry_triggers?: string[] | null; trigger_mode?: 'ANY' | 'ALL'; entry_filters?: string[] | null;
 }
+export interface CustomStrategyInput {
+  name: string; entry_rule: 'rule_builder'; entry_triggers: string[];
+  trigger_mode: 'ANY' | 'ALL'; entry_filters: string[];
+  direction: 'BOTH' | 'LONG' | 'SHORT'; volume_min: number;
+  rsi_lower: number; rsi_upper: number; leverage: number; stop_pct: number;
+  atr_multiple: number; reward_risk: number; max_candles: number;
+}
+export interface SimulationCatalog { strategies: LabStrategy[]; selected_keys: string[] }
+export const getSimulationCatalog = (symbol: MarketSymbol = 'BTCUSDT') => getJson<SimulationCatalog>(`/simulator/strategies?symbol=${symbol}`);
+export const createSimulationStrategy = (strategy: CustomStrategyInput) => postJson<LabStrategy>('/simulator/strategies', strategy);
+export const saveSimulationSelection = (strategy_keys: string[], symbol: MarketSymbol = 'BTCUSDT') => postJson<{ selected_keys: string[] }>('/simulator/selection', { strategy_keys, symbol });
 export interface LabTrade {
   side: string; entry_time: string; entry_price: number; stop_price: number;
   target_price: number; margin: number; quantity: number; candles_held: number;
@@ -144,13 +163,13 @@ export interface LabStatus {
   snapshot: { historical: LabMetrics[]; live: LabMetrics[]; source: string;
     symbol: string; timeframe: string; history_candles: number;
     research?: { method: string; candidates_tested: number; discovery_start: string; discovery_end: string;
-      excluded_recent_candles?: number;
-      trials?: { strategy: LabStrategy; discovery_return: number; discovery_drawdown: number; trades: number }[];
+      excluded_recent_candles?: number; selected_manually?: boolean; custom_tested?: number;
+      trials?: { strategy: LabStrategy; discovery_return: number; discovery_drawdown: number; win_rate?: number | null; trades: number }[];
       validation_start: string; validation_end: string; training: LabMetrics[]; validation: LabMetrics[];
       assessments: { key: string; status: string; discovery_trades: number; validation_trades: number }[] } } | null;
 }
-export function getLiveSimulation(): Promise<LabStatus> { return getJson<LabStatus>('/simulator/live'); }
-export function setLiveSimulation(active: boolean): Promise<LabStatus> { return postJson<LabStatus>('/simulator/live', { active }); }
+export function getLiveSimulation(symbol: MarketSymbol = 'BTCUSDT'): Promise<LabStatus> { return getJson<LabStatus>(`/simulator/live?symbol=${symbol}`); }
+export function setLiveSimulation(active: boolean, symbol: MarketSymbol = 'BTCUSDT'): Promise<LabStatus> { return postJson<LabStatus>('/simulator/live', { active, symbol }); }
 
 export interface HyperliquidConnection {
   connection: { network: 'mainnet' | 'testnet'; account_address: string } | null;

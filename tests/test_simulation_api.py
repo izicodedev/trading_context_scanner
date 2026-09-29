@@ -35,6 +35,26 @@ def test_requires_session(client):
     with client.session_transaction() as session:
         session.clear()
     assert client.post("/api/simulator", json=payload()).status_code == 401
+    assert client.get("/api/simulator/strategies").status_code == 401
+    assert client.post("/api/simulator/selection", json={"strategy_keys": []}).status_code == 401
+
+
+def test_custom_strategy_endpoints_are_user_scoped(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(simulation_api.user_strategies, "catalog", lambda user_id, symbol: {"strategies": [], "selected_keys": []})
+    def create(user_id, definition):
+        seen.append((user_id, definition["name"]))
+        return {"key": "custom_123", "name": definition["name"]}
+    def choose(user_id, keys, symbol):
+        seen.append((user_id, keys, symbol))
+        return keys
+    monkeypatch.setattr(simulation_api.user_strategies, "create", create)
+    monkeypatch.setattr(simulation_api.user_strategies, "choose", choose)
+    assert client.get("/api/simulator/strategies").get_json()["selected_keys"] == []
+    assert client.post("/api/simulator/strategies", json={"name": "Minha regra"}).status_code == 201
+    assert client.post("/api/simulator/selection", json={"strategy_keys": ["custom_123"]}).get_json()["selected_keys"] == ["custom_123"]
+    assert seen == [(1, "Minha regra"), (1, ["custom_123"], "BTCUSDT")]
+    assert client.post("/api/simulator/selection", json={"bad": 1}).status_code == 400
 
 
 def test_simulation_serializes_result(client):
@@ -125,13 +145,15 @@ def test_database_errors_do_not_expose_connection_details(client, monkeypatch):
 
 def test_live_control_is_user_scoped_and_requires_boolean(client, monkeypatch):
     calls = []
-    monkeypatch.setattr(simulation_api.lab_service, "start", lambda user: calls.append(("start", user)))
-    monkeypatch.setattr(simulation_api.lab_service, "advance", lambda user, stopping: calls.append(("stop", user)))
-    monkeypatch.setattr(simulation_api.lab_service, "status", lambda user: {"active": True})
+    monkeypatch.setattr(simulation_api.lab_service, "start", lambda user, symbol: calls.append(("start", user, symbol)))
+    monkeypatch.setattr(simulation_api.lab_service, "advance", lambda user, stopping, symbol: calls.append(("stop", user, symbol)))
+    monkeypatch.setattr(simulation_api.lab_service, "status", lambda user, symbol: {"active": True, "symbol": symbol})
     assert client.post("/api/simulator/live", json={"active": "true"}).status_code == 400
     assert client.post("/api/simulator/live", json={"active": True, "user_id": 999}).status_code == 200
     assert client.post("/api/simulator/live", json={"active": False}).status_code == 200
-    assert calls == [("start", 1), ("stop", 1)]
+    assert calls == [("start", 1, "BTCUSDT"), ("stop", 1, "BTCUSDT")]
+    assert client.post("/api/simulator/live", json={"active": True, "symbol": "ETHUSDT"}).get_json()["symbol"] == "ETHUSDT"
+    assert calls[-1] == ("start", 1, "ETHUSDT")
     with client.session_transaction() as session:
         session.clear()
     assert client.get("/api/simulator/live").status_code == 401

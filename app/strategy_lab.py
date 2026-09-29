@@ -32,6 +32,15 @@ class Strategy:
     max_candles: int
     description: str
     threshold: float = 1.0
+    entry_rule: str | None = None
+    direction: str = "BOTH"
+    ema_filter: bool = True
+    volume_min: float = 0.0
+    rsi_lower: float = 40.0
+    rsi_upper: float = 70.0
+    entry_triggers: list[str] | None = None
+    trigger_mode: str = "ANY"
+    entry_filters: list[str] | None = None
 
 
 STRATEGIES = (
@@ -45,6 +54,40 @@ STRATEGIES = (
 
 
 def decision(strategy: Strategy, previous, current) -> str | None:
+    if strategy.entry_rule == "rule_builder":
+        for side in ("LONG", "SHORT"):
+            if strategy.direction not in ("BOTH", side):
+                continue
+            trigger_results = [_custom_trigger(code, side, previous, current, strategy)
+                               for code in strategy.entry_triggers or []]
+            triggered = (all(trigger_results) if strategy.trigger_mode == "ALL" else any(trigger_results))
+            if triggered and all(_custom_filter(code, side, current, strategy)
+                                 for code in strategy.entry_filters or []):
+                return side
+        return None
+    if strategy.entry_rule:
+        long = short = False
+        if strategy.entry_rule == "ema_trend":
+            long, short = current.close > current.ema21, current.close < current.ema21
+        elif strategy.entry_rule == "channel_breakout":
+            long, short = current.close > current.hh20, current.close < current.ll20
+        elif strategy.entry_rule == "rsi_recovery":
+            long = previous.rsi < strategy.rsi_lower <= current.rsi and current.close > current.open
+            short = previous.rsi > 100 - strategy.rsi_lower >= current.rsi and current.close < current.open
+        else:
+            return None
+        if strategy.ema_filter:
+            long = long and current.ema21 > current.ema50
+            short = short and current.ema21 < current.ema50
+        long = long and strategy.rsi_lower <= current.rsi <= strategy.rsi_upper
+        short = short and 100 - strategy.rsi_upper <= current.rsi <= 100 - strategy.rsi_lower
+        if current.vol_ratio < strategy.volume_min:
+            return None
+        if long and strategy.direction in ("BOTH", "LONG"):
+            return "LONG"
+        if short and strategy.direction in ("BOTH", "SHORT"):
+            return "SHORT"
+        return None
     if strategy.key.startswith("trend_carry"):
         if current.ema21 > current.ema50 and current.close > current.ema21 and 50 <= current.rsi <= 70:
             return "LONG"
@@ -93,6 +136,44 @@ def decision(strategy: Strategy, previous, current) -> str | None:
     return None
 
 
+def _custom_trigger(code: str, side: str, previous, current, strategy: Strategy) -> bool:
+    long = side == "LONG"
+    if code == "channel_breakout":
+        return current.close > current.hh20 if long else current.close < current.ll20
+    if code == "rsi_recovery":
+        return (previous.rsi < strategy.rsi_lower <= current.rsi if long else
+                previous.rsi > 100 - strategy.rsi_lower >= current.rsi)
+    if code == "ema_cross":
+        return (previous.close <= previous.ema21 and current.close > current.ema21 if long else
+                previous.close >= previous.ema21 and current.close < current.ema21)
+    if code == "ema_pullback":
+        return (current.low <= current.ema21 < current.close if long else
+                current.high >= current.ema21 > current.close)
+    if code == "liquidity_sweep":
+        return (current.low < current.ll20 < current.close if long else
+                current.high > current.hh20 > current.close)
+    if code == "failed_breakout":
+        return (previous.close < previous.ll20 and current.close > previous.ll20 if long else
+                previous.close > previous.hh20 and current.close < previous.hh20)
+    return False
+
+
+def _custom_filter(code: str, side: str, current, strategy: Strategy) -> bool:
+    long = side == "LONG"
+    if code == "ema_alignment":
+        return current.ema21 > current.ema50 if long else current.ema21 < current.ema50
+    if code == "price_ema21":
+        return current.close > current.ema21 if long else current.close < current.ema21
+    if code == "rsi_band":
+        return (strategy.rsi_lower <= current.rsi <= strategy.rsi_upper if long else
+                100 - strategy.rsi_upper <= current.rsi <= 100 - strategy.rsi_lower)
+    if code == "volume":
+        return current.vol_ratio >= strategy.volume_min
+    if code == "candle_color":
+        return current.close > current.open if long else current.close < current.open
+    return False
+
+
 def settlement(position: dict, price: float, time: pd.Timestamp, config: LabConfig) -> dict:
     """Costs on notionals; funding at UTC hour boundaries, with side sign."""
     sign = 1 if position["side"] == "LONG" else -1
@@ -123,14 +204,14 @@ def open_position(strategy: Strategy, side: str, bar, signal, balance: float, co
                 quantity=margin * strategy.leverage / price, candles_held=0)
 
 
-def exit_event(position: dict, strategy: Strategy, bar, config: LabConfig):
+def exit_event(position: dict, strategy: Strategy, bar, config: LabConfig, symbol: str = "BTCUSDT"):
     long = position["side"] == "LONG"
     # Approximate isolated margin liquidation takes precedence when the opening gaps beyond it.
     liquidation_gap = bar.open <= position["liquidation_price"] if long else bar.open >= position["liquidation_price"]
     if liquidation_gap:
         return "LIQUIDATION", float(bar.open), bar.open_time, False
     risk_barrier = max(position["stop_price"], position["liquidation_price"]) if long else min(position["stop_price"], position["liquidation_price"])
-    spec = TradeSpec("BTCUSDT", "5m", position["side"], position["entry_price"],
+    spec = TradeSpec(symbol, "5m", position["side"], position["entry_price"],
                      pd.Timestamp(position["entry_time"]), risk_barrier, position["target_price"])
     event = resolve_barriers(spec, bar)
     if event:
@@ -180,7 +261,8 @@ def summarize(trades: list[dict], curve: list[dict], position: dict | None,
 
 
 def replay(frame: pd.DataFrame, strategy: Strategy, config: LabConfig,
-           live_start: pd.Timestamp | None = None, stop: bool = False) -> dict:
+           live_start: pd.Timestamp | None = None, stop: bool = False,
+           symbol: str = "BTCUSDT") -> dict:
     """One position per strategy. Decide on bar i-1, enter at bar i open."""
     if not frame.empty:
         _validated_candles(frame, pd.Timestamp(frame.iloc[0].open_time))
@@ -199,7 +281,7 @@ def replay(frame: pd.DataFrame, strategy: Strategy, config: LabConfig,
                 position = open_position(strategy, side, bar, signal, balance, config)
         if position is not None:
             position["candles_held"] += 1
-            event = exit_event(position, strategy, bar, config)
+            event = exit_event(position, strategy, bar, config, symbol)
             if event is None and stop and index == len(rows) - 1:
                 event = ("STOPPED" if live_start is not None else "SAMPLE_END", float(bar.close), bar.close_time, False)
             if event:

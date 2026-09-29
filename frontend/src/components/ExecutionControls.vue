@@ -11,6 +11,13 @@ const now = ref(Date.now())
 let timer: number | undefined
 const allowed = computed(() => props.network === 'mainnet' ? data.value?.mainnet_enabled : data.value?.testnet_enabled)
 const stale = computed(() => data.value?.run?.managing && (!data.value.run.heartbeat || now.value - Date.parse(data.value.run.heartbeat) > 60000))
+const status = computed(() => {
+  if (!data.value) return 'Carregando'
+  if (stale.value) return 'Processamento atrasado'
+  if (data.value.run?.active) return 'Operando'
+  if (data.value.run?.managing) return 'Gerenciando posição'
+  return 'Parado'
+})
 const url = `${(import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')}/hyperliquid/execution`
 async function request(active?: boolean) {
   if (busy.value) return
@@ -30,19 +37,23 @@ onBeforeUnmount(() => window.clearInterval(timer))
 </script>
 <template>
   <section class="execution">
-    <h3>Execução automática</h3>
-    <p v-if="data?.run"><strong>{{ data.run.active ? 'Novas entradas habilitadas' : 'Novas entradas paradas' }}</strong> · {{ strategyName(data.run.state.strategy) }}</p>
-    <p v-else>Nenhuma estratégia em execução.</p>
-    <p v-if="data?.run">{{ data.run.state.message }}<br />Último processamento: {{ data.run.heartbeat ? new Date(data.run.heartbeat).toLocaleString('pt-BR') : 'Aguardando worker' }}</p>
-    <p v-if="stale" role="alert">Processamento atrasado ou worker ausente. Confira a posição e as proteções na Hyperliquid.</p>
-    <p v-if="data?.run?.state.phase === 'open'">Quantidade {{ data.run.state.quantity }} BTC · entrada {{ data.run.state.entry_price }} · stop {{ data.run.state.stop }} · alvo {{ data.run.state.target }}</p>
-    <p v-if="data && !allowed">O envio de ordens nesta rede está bloqueado na configuração do servidor.</p>
-    <button v-if="data?.run?.active" :disabled="busy" @click="request(false)">Parar novas entradas</button>
-    <button v-else :disabled="busy || !allowed || data?.run?.managing" @click="request(true)">Ativar estratégia {{ network === 'mainnet' ? 'na conta real' : 'na testnet' }}</button>
-    <p>Parar impede novas entradas. A gestão de uma posição já aberta continua, inclusive stop, alvo e prazo máximo. As regras ficam congeladas por sessão. Envios incertos são reconciliados sem repetir a entrada; se a confirmação continuar indisponível, confira a conta na Hyperliquid.</p>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <div class="execution-head"><span class="eyebrow">ROBÔ REAL · BTC</span><span class="status" :class="{ active: data?.run?.active && !stale, warning: stale }"><i />{{ status }}</span></div>
+    <h2>{{ data?.run ? strategyName(data.run.state.strategy) : 'Nenhuma estratégia ativa' }}</h2>
+    <p class="message">{{ data?.run?.state.message ?? 'Escolha uma estratégia e configure a carteira para começar.' }}</p>
+    <p v-if="data?.run?.managing" class="heartbeat">Último processamento: {{ data.run.heartbeat ? new Date(data.run.heartbeat).toLocaleString('pt-BR') : 'Aguardando worker' }}</p>
+    <p v-if="stale" class="alert" role="alert">Processamento atrasado. Confira a posição e as proteções na Hyperliquid.</p>
+    <div v-if="data?.run?.state.phase === 'open'" class="position"><div><span>Posição</span><strong>{{ data.run.state.quantity }} BTC</strong></div><div><span>Entrada</span><strong>{{ data.run.state.entry_price }}</strong></div><div><span>Stop</span><strong>{{ data.run.state.stop }}</strong></div><div><span>Alvo</span><strong>{{ data.run.state.target }}</strong></div></div>
+    <div class="actions"><button v-if="data?.run?.active" class="stop" :disabled="busy" @click="request(false)">Parar novas entradas</button><button v-else :disabled="busy || !allowed || data?.run?.managing" @click="request(true)">Ativar estratégia</button><span v-if="data && !allowed">Execução nesta rede bloqueada no servidor</span><span v-else-if="data?.run?.managing && !data.run.active">A posição aberta continua sendo gerenciada</span></div>
+    <p v-if="error" class="alert" role="alert">{{ error }}</p>
+    <details><summary>Como funciona o controle</summary><p>Parar impede novas entradas. A gestão de uma posição já aberta continua, inclusive stop, alvo e prazo máximo. As regras ficam congeladas por sessão. Envios incertos exigem conferência na Hyperliquid.</p></details>
   </section>
 </template>
 <style scoped>
-.execution { border: 1px solid #455468; padding: 20px; border-radius: 8px; margin: 20px 0; }p { color: #94a3b8; font-size: .85rem; line-height: 1.7; }button { padding: 12px 16px; border-radius: 6px; border: 0; cursor: pointer; }button:disabled { opacity: .5; cursor: not-allowed; }[role=alert] { color: #f2b3b3; }
+.execution { min-width: 0; padding: 28px; border: 1px solid #2b3d52; border-radius: 14px; background: #101f30; }
+.execution-head,.actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }.eyebrow { color: #8ea1b7; letter-spacing: .12em; font-size: .68rem; font-weight: 700; }
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #34465b; border-radius: 999px; color: #b8c6d4; font-size: .73rem; white-space: nowrap; }.status i { width: 7px; height: 7px; border-radius: 50%; background: #92a1b0; }.status.active { color: #87d4b2; border-color: #326b55; background: #15392e; }.status.active i { background: #66d2a1; }.status.warning { color: #f5c583; border-color: #7c5b30; }.status.warning i { background: #f5c583; }
+h2 { margin: 24px 0 10px; font-size: clamp(1.3rem, 2.5vw, 1.8rem); font-weight: 600; line-height: 1.3; letter-spacing: -.025em; }p { margin: 0; color: #a7b5c6; font-size: .83rem; line-height: 1.6; }.message { min-height: 2.6em; }.heartbeat { margin-top: 10px; color: #8193a9; font-size: .73rem; }
+.position { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; border-top: 1px solid #2b3d52; margin-top: 20px; padding-top: 18px; }.position span { display: block; color: #8ea1b7; font-size: .68rem; }.position strong { display: block; margin-top: 6px; font-size: .85rem; font-weight: 600; }
+.actions { justify-content: flex-start; margin-top: 26px; }.actions span { color: #8ea1b7; font-size: .75rem; }button { border: 0; border-radius: 8px; padding: 11px 18px; background: #dce8f3; color: #0a1928; font-size: .8rem; font-weight: 650; cursor: pointer; }button.stop { background: #283b4e; color: #e5edf7; }button:disabled { opacity: .45; cursor: not-allowed; }
+.alert { margin-top: 12px; color: #f4a9a9; }details { margin-top: 24px; }summary { width: max-content; color: #8ea1b7; cursor: pointer; font-size: .75rem; }details p { margin-top: 12px; }button:focus-visible,summary:focus-visible { outline: 2px solid #93c5fd; outline-offset: 4px; }@media(max-width:650px) { .execution { padding: 20px; }.position { grid-template-columns: repeat(2, 1fr); } }
 </style>
