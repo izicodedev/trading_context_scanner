@@ -75,9 +75,12 @@ class Broker:
         if self.exchange.update_leverage(value, 'BTC', is_cross=False).get('status') != 'ok':
             raise ExecutionBlocked('Não foi possível configurar margem isolada.')
 
-    def entry(self, cloid, quantity, buy):
+    def entry(self, cloid, quantity, buy, limit_price):
         self.exchange.set_expires_after(int(time.time() * 1000) + 15000)
-        return parse_order(self.exchange.market_open('BTC', buy, quantity, slippage=.001, cloid=Cloid.from_str(cloid)))
+        # The caller calculates the IOC limit from the already checked market price.
+        # Do not make another /info request after the entry intent is journaled.
+        return parse_order(self.exchange.order('BTC', buy, quantity, limit_price,
+            {'limit': {'tif': 'Ioc'}}, cloid=Cloid.from_str(cloid)))
 
     def close(self, cloid, quantity, buy):
         # reduce_only is explicit; never opens or reverses exposure.

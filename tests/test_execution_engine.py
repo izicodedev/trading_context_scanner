@@ -85,7 +85,32 @@ def test_timeout_never_resends(signal):
     assert state['phase']=='submitting'
     engine.step(b,j,config(),state,True,3000)
     assert state['phase']=='submitting' and state['pause_entries']
+    assert state['entry_error'] == {'type': 'TimeoutError'}
     assert sum(kind=='entry' for kind,_ in b.sent)==1
+
+
+def test_entry_uses_prechecked_market_price(signal):
+    b,j,state = Broker(),Journal(),{'phase':'waiting'}
+    engine.step(b,j,config(),state,True,2000)
+    entry = next(p for kind,p in b.sent if kind=='entry')
+    assert entry['limit_price'] == engine.price_round(10000 * 1.001, 5)
+
+
+def test_sdk_entry_sends_ioc_at_supplied_limit_without_price_lookup():
+    from app.execution_broker import Broker as SdkBroker
+    class Exchange:
+        def __init__(self): self.orders=[]
+        def set_expires_after(self, value): pass
+        def order(self,*args,**kwargs):
+            self.orders.append((args,kwargs))
+            return {'status':'ok','response':{'data':{'statuses':[{'filled':{'totalSz':'0.01','avgPx':'10000'}}]}}}
+    broker=SdkBroker.__new__(SdkBroker)
+    broker.exchange=Exchange()
+    result=broker.entry('0x'+'a'*32,.01,True,10010)
+    assert result['filled']==.01
+    args,kwargs=broker.exchange.orders[0]
+    assert args[:5] == ('BTC',True,.01,10010,{'limit':{'tif':'Ioc'}})
+    assert kwargs['cloid'].to_raw() == '0x'+'a'*32
 
 
 def test_rejected_protection_sends_reduce_close_and_halts(signal):

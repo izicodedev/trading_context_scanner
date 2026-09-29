@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { LabStrategy } from '../services/api'
 import { strategyName } from '../services/strategyDisplay'
 const props = defineProps<{ network: string }>()
-interface Run { active: boolean; managing: boolean; heartbeat: string | null; state: { phase: string; message: string; strategy: LabStrategy; quantity?: number; entry_price?: number; stop?: number; target?: number; daily_pnl?: number } }
+interface Run { active: boolean; managing: boolean; heartbeat: string | null; state: { phase: string; message: string; strategy: LabStrategy; quantity?: number; entry_price?: number; stop?: number; target?: number; daily_pnl?: number; entry_error?: { type: string; http_status?: number } } }
 const data = ref<{ run: Run | null; mainnet_enabled: boolean; testnet_enabled: boolean } | null>(null)
 const error = ref('')
 const busy = ref(false)
@@ -14,9 +14,17 @@ const stale = computed(() => data.value?.run?.managing && (!data.value.run.heart
 const status = computed(() => {
   if (!data.value) return 'Carregando'
   if (stale.value) return 'Processamento atrasado'
+  if (data.value.run?.state.phase === 'submitting') return 'Entrada em verificação'
   if (data.value.run?.active) return 'Operando'
   if (data.value.run?.managing) return 'Gerenciando posição'
   return 'Parado'
+})
+const entryError = computed(() => {
+  const diagnostic = data.value?.run?.state.entry_error
+  if (!diagnostic || data.value?.run?.state.phase !== 'submitting') return ''
+  if (['ConnectionError', 'ConnectTimeout', 'ReadTimeout', 'Timeout'].includes(diagnostic.type)) return 'Falha de rede durante o envio.'
+  if (diagnostic.http_status) return `A API respondeu HTTP ${diagnostic.http_status} durante o envio.`
+  return `Falha no envio: ${diagnostic.type}.`
 })
 const url = `${(import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')}/hyperliquid/execution`
 async function request(active?: boolean) {
@@ -40,10 +48,11 @@ onBeforeUnmount(() => window.clearInterval(timer))
     <div class="execution-head"><span class="eyebrow">ROBÔ REAL · BTC</span><span class="status" :class="{ active: data?.run?.active && !stale, warning: stale }"><i />{{ status }}</span></div>
     <h2>{{ data?.run ? strategyName(data.run.state.strategy) : 'Nenhuma estratégia ativa' }}</h2>
     <p class="message">{{ data?.run?.state.message ?? 'Escolha uma estratégia e configure a carteira para começar.' }}</p>
+    <p v-if="entryError" class="alert" role="alert">{{ entryError }}</p>
     <p v-if="data?.run?.managing" class="heartbeat">Último processamento: {{ data.run.heartbeat ? new Date(data.run.heartbeat).toLocaleString('pt-BR') : 'Aguardando worker' }}</p>
     <p v-if="stale" class="alert" role="alert">Processamento atrasado. Confira a posição e as proteções na Hyperliquid.</p>
     <div v-if="data?.run?.state.phase === 'open'" class="position"><div><span>Posição</span><strong>{{ data.run.state.quantity }} BTC</strong></div><div><span>Entrada</span><strong>{{ data.run.state.entry_price }}</strong></div><div><span>Stop</span><strong>{{ data.run.state.stop }}</strong></div><div><span>Alvo</span><strong>{{ data.run.state.target }}</strong></div></div>
-    <div class="actions"><button v-if="data?.run?.active" class="stop" :disabled="busy" @click="request(false)">Parar novas entradas</button><button v-else :disabled="busy || !allowed || data?.run?.managing" @click="request(true)">Ativar estratégia</button><span v-if="data && !allowed">Execução nesta rede bloqueada no servidor</span><span v-else-if="data?.run?.managing && !data.run.active">A posição aberta continua sendo gerenciada</span></div>
+    <div class="actions"><button v-if="data?.run?.active" class="stop" :disabled="busy" @click="request(false)">Parar novas entradas</button><button v-else :disabled="busy || !allowed || data?.run?.managing" @click="request(true)">Ativar estratégia</button><span v-if="data && !allowed">Execução nesta rede bloqueada no servidor</span><span v-else-if="data?.run?.managing && data.run.state.phase === 'submitting'">Entrada sem confirmação; nova ativação bloqueada até a conferência.</span><span v-else-if="data?.run?.managing && !data.run.active">A posição aberta continua sendo gerenciada</span></div>
     <p v-if="error" class="alert" role="alert">{{ error }}</p>
     <details><summary>Como funciona o controle</summary><p>Parar impede novas entradas. A gestão de uma posição já aberta continua, inclusive stop, alvo e prazo máximo. As regras ficam congeladas por sessão. Envios incertos exigem conferência na Hyperliquid.</p></details>
   </section>

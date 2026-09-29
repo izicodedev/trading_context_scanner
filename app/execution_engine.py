@@ -228,10 +228,21 @@ def step(broker, journal, config, state, active, now=None):
     if not math.isfinite(distance) or distance <= 0 or distance / price >= .8 / leverage:
         raise ExecutionBlocked('Stop incompatível com a alavancagem configurada.')
     broker.leverage(leverage)
+    entry_limit = price_round(price * (1.001 if side == 'LONG' else .999), decimals)
     cloid = journal.cloid('entry:' + str(candle))
     state.update(phase='submitting', entry_cloid=cloid, side=side, submitted_ms=now, requested_quantity=qty, message='Enviando entrada.')
     journal.save(state)
-    result = journal.send('entry:' + str(candle), broker.entry, dict(quantity=qty, buy=side == 'LONG'))
+    try:
+        result = journal.send('entry:' + str(candle), broker.entry,
+                              dict(quantity=qty, buy=side == 'LONG', limit_price=entry_limit))
+    except Exception as exc:
+        # Keep only a safe diagnostic code; SDK exceptions may include signed payloads.
+        diagnostic = {'type': type(exc).__name__}
+        status_code = getattr(exc, 'status_code', None)
+        if type(status_code) is int and 400 <= status_code <= 599:
+            diagnostic['http_status'] = status_code
+        state['entry_error'] = diagnostic
+        raise
     if result['filled'] == 0:
         if result.get('resting'):
             raise ExecutionBlocked('Entrada inesperadamente pendente. Confira a ordem na Hyperliquid.')
