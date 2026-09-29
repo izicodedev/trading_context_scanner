@@ -36,3 +36,16 @@ Alterações locais; nenhum deploy nem operação real de teste foi feito.
 Desabilitar novas entradas no servidor não interrompe a recuperação de uma
 posição já gerenciada. O botão Parar novas entradas também mantém essa gestão.
 O deploy por si só não é autorização para habilitar uma rede ou iniciar sessão.
+
+## Entrada incerta sem ordem na corretora
+
+Uma sessão `submitting` com ação `pending` bloqueia outra ativação enquanto a
+corretora não confirmar o destino da entrada. Se a consulta por CLOID continuar
+`unknownOid`, use `python -m app.reconcile_execution ID` para conferir a sessão
+sem alterá-la. Após inspecionar a conta na Hyperliquid, o operador pode executar
+`python -m app.reconcile_execution ID --release`. O comando exige sessão parada,
+entrada pendente há pelo menos 30 minutos, um único registro de entrada no journal,
+CLOID desconhecido, ausência de posições, ordens e fills posteriores ao envio.
+Ele não envia nem cancela ordens; só encerra o gerenciamento local dessa sessão.
+Uma nova ativação continua exigindo o botão na interface e todas as validações do
+executor. Se qualquer verificação falhar, a sessão permanece bloqueada.
