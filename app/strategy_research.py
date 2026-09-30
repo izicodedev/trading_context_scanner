@@ -4,6 +4,11 @@ from hashlib import sha256
 
 from .strategy_lab import LabConfig, Strategy, replay
 
+REAL_EXECUTION_FAMILIES = (
+    "range_reclaim", "momentum_reset", "failed_breakout", "trend_carry",
+    "channel_follow", "deep_recovery",
+)
+
 
 def candidates():
     families = [
@@ -27,7 +32,25 @@ def candidates():
                 for horizon in (72, 144):
                     output.append(Strategy(f"{family}_{i}", name, 5, stop, 1.5, rr, horizon, description))
                     i += 1
+    for family, name, description, thresholds in (
+        ("trend_retest", "Reteste de tendência", "EMA21/50/200 alinhadas e EMA50 inclinada; preço recupera a EMA21 com volume e RSI controlados.", (55., 60., 65.)),
+        ("compression_breakout", "Rompimento após compressão", "Canal de 20 candles estreito em relação ao ATR; rompimento com volume e tendência das três EMAs.", (4., 5., 6.)),
+        ("band_reentry", "Retorno à banda", "Preço volta para dentro da banda de Bollinger após excesso, com EMAs próximas e RSI do lado da reversão.", (.002, .004, .006)),
+        ("swing_breakout", "Rompimento de 4 horas", "Rompimento do canal de 48 candles com EMA50/200 e inclinação da EMA200 na direção do movimento.", (.8, 1., 1.2)),
+    ):
+        stops, rewards, horizons = ((.01, .015, .02), (1.5, 2., 2.), (144, 216, 288)) if family == "swing_breakout" else ((.006, .01, .015), (1.5, 2., 2.5), (24, 48, 72))
+        for i, (threshold, stop, rr, horizon) in enumerate(zip(thresholds, stops, rewards, horizons)):
+            output.append(Strategy(f"{family}_{i}", name, 5, stop, 1.5, rr, horizon,
+                                   description, threshold))
+    output.append(Strategy("breakout_retest_0", "Rompimento com reteste", 5, .008, 1.5,
+                           3., 144, "Rompimento do canal de 4 horas com volume, reteste confirmado no candle seguinte e stop móvel após 1R."))
     return output
+
+
+def real_execution_candidates():
+    """Explicit allowlist; new research families stay paper-only until promoted."""
+    return [strategy for strategy in candidates()
+            if any(strategy.key.startswith(f"{family}_") for family in REAL_EXECUTION_FAMILIES)]
 
 
 def select_strategies(frame, config: LabConfig, symbol: str = "BTCUSDT"):

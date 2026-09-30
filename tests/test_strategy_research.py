@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pandas as pd
@@ -60,3 +61,30 @@ def test_new_rules_use_observed_signal_and_prior_bar():
     assert decision(pool[6], previous, current) == "SHORT"
     current.vol_ratio = .1
     assert decision(pool[6], previous, current) is None
+
+
+def test_direction_applies_to_predefined_rules():
+    strategy = next(item for item in research.candidates() if item.key == "trend_carry_15")
+    current = SimpleNamespace(ema21=101, ema50=100, close=102, rsi=60)
+    assert decision(strategy, None, current) == "LONG"
+    assert decision(replace(strategy, direction="SHORT"), None, current) is None
+
+
+def test_swing_breakout_uses_prior_channel_and_long_term_trend():
+    strategy = next(item for item in research.candidates() if item.key == "swing_breakout_0")
+    previous = SimpleNamespace(close=99, hh48=100, ll48=90)
+    current = SimpleNamespace(close=101, hh48=100, ll48=90, vol_ratio=1,
+                              ema50=99, ema200=98, ema200_24=97)
+    assert decision(strategy, previous, current) == "LONG"
+    current.ema200_24 = 99
+    assert decision(strategy, previous, current) is None
+
+
+def test_new_research_families_are_not_available_to_real_execution():
+    all_keys = {item.key for item in research.candidates()}
+    real_keys = {item.key for item in research.real_execution_candidates()}
+    assert len(all_keys) == 76
+    assert len(real_keys) == 63
+    assert "trend_carry_15" in real_keys
+    assert "swing_breakout_0" not in real_keys
+    assert "breakout_retest_0" not in real_keys

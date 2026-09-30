@@ -18,7 +18,7 @@ class LabConfig:
     maintenance_margin_rate: float = .005
     daily_goal_pct: float = 5.0
     warmup: int = 60
-    version: str = "4"
+    version: str = "6"
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ STRATEGIES = (
 )
 
 
-def decision(strategy: Strategy, previous, current) -> str | None:
+def _decision_unfiltered(strategy: Strategy, previous, current) -> str | None:
     if strategy.entry_rule == "rule_builder":
         for side in ("LONG", "SHORT"):
             if strategy.direction not in ("BOTH", side):
@@ -92,6 +92,50 @@ def decision(strategy: Strategy, previous, current) -> str | None:
         if current.ema21 > current.ema50 and current.close > current.ema21 and 50 <= current.rsi <= 70:
             return "LONG"
         if current.ema21 < current.ema50 and current.close < current.ema21 and 30 <= current.rsi <= 50:
+            return "SHORT"
+    elif strategy.key.startswith("trend_retest"):
+        if (current.ema21 > current.ema50 > current.ema200
+                and current.ema50 > current.ema50_12
+                and previous.close <= previous.ema21 < current.close
+                and current.rsi <= strategy.threshold and current.vol_ratio >= .8):
+            return "LONG"
+        if (current.ema21 < current.ema50 < current.ema200
+                and current.ema50 < current.ema50_12
+                and previous.close >= previous.ema21 > current.close
+                and current.rsi >= 100 - strategy.threshold and current.vol_ratio >= .8):
+            return "SHORT"
+    elif strategy.key.startswith("compression_breakout"):
+        if current.channel_width_atr <= strategy.threshold and current.vol_ratio >= 1.2:
+            if current.close > current.hh20 and current.ema21 > current.ema50 > current.ema200:
+                return "LONG"
+            if current.close < current.ll20 and current.ema21 < current.ema50 < current.ema200:
+                return "SHORT"
+    elif strategy.key.startswith("band_reentry"):
+        if abs(current.ema21 - current.ema50) / current.close <= strategy.threshold:
+            if previous.close < previous.bb_lower and current.close > current.bb_lower and current.rsi < 50:
+                return "LONG"
+            if previous.close > previous.bb_upper and current.close < current.bb_upper and current.rsi > 50:
+                return "SHORT"
+    elif strategy.key.startswith("swing_breakout"):
+        if current.vol_ratio >= strategy.threshold:
+            if (previous.close <= previous.hh48 and current.close > current.hh48
+                    and current.ema50 > current.ema200 > current.ema200_24):
+                return "LONG"
+            if (previous.close >= previous.ll48 and current.close < current.ll48
+                    and current.ema50 < current.ema200 < current.ema200_24):
+                return "SHORT"
+    elif strategy.key.startswith("breakout_retest"):
+        if (previous.vol_ratio >= 1.2 and current.vol_ratio >= .7
+                and current.ema50 > current.ema200 > current.ema200_24
+                and previous.close > previous.hh48
+                and current.low <= previous.hh48 < current.close
+                and current.close > current.open):
+            return "LONG"
+        if (previous.vol_ratio >= 1.2 and current.vol_ratio >= .7
+                and current.ema50 < current.ema200 < current.ema200_24
+                and previous.close < previous.ll48
+                and current.high >= previous.ll48 > current.close
+                and current.close < current.open):
             return "SHORT"
     elif strategy.key.startswith("channel_follow"):
         if current.close > current.hh20 and current.ema21 > current.ema50:
@@ -134,6 +178,11 @@ def decision(strategy: Strategy, previous, current) -> str | None:
         if previous.rsi >= 70 > current.rsi and current.close < current.open:
             return "SHORT"
     return None
+
+
+def decision(strategy: Strategy, previous, current) -> str | None:
+    side = _decision_unfiltered(strategy, previous, current)
+    return side if side and strategy.direction in ("BOTH", side) else None
 
 
 def _custom_trigger(code: str, side: str, previous, current, strategy: Strategy) -> bool:
@@ -195,13 +244,34 @@ def open_position(strategy: Strategy, side: str, bar, signal, balance: float, co
     price = float(bar.open)
     sign = 1 if side == "LONG" else -1
     distance = max(price * strategy.stop_floor, float(signal.atr) * strategy.atr_multiple)
+    if strategy.key.startswith("breakout_retest"):
+        retest_extreme = float(signal.low if side == "LONG" else signal.high)
+        distance = max(distance, sign * (price - retest_extreme))
     margin = balance * config.margin_fraction
     mmr = config.maintenance_margin_rate
     liquidation = price * (1 - sign / strategy.leverage) / (1 - sign * mmr)
     return dict(side=side, entry_price=price, entry_time=bar.open_time.isoformat(),
                 stop_price=price - sign * distance, target_price=price + sign * distance * strategy.reward_risk,
                 liquidation_price=liquidation, margin=margin,
-                quantity=margin * strategy.leverage / price, candles_held=0)
+                quantity=margin * strategy.leverage / price, candles_held=0,
+                initial_risk=distance)
+
+
+def advance_stop(position: dict, strategy: Strategy, bar, config: LabConfig) -> None:
+    """Move a paper stop only after the bar closes; never retroactively fill it."""
+    if not strategy.key.startswith("breakout_retest"):
+        return
+    entry, risk = position["entry_price"], position["initial_risk"]
+    sign = 1 if position["side"] == "LONG" else -1
+    if sign * (float(bar.close) - entry) < risk:
+        return
+    # Approximate round-trip cost at the entry notional before calling it break-even.
+    buffer = entry * 2 * (config.fee_rate + config.slippage_rate)
+    candidate = float(bar.close) - sign * 2 * float(bar.atr)
+    if sign == 1:
+        position["stop_price"] = max(position["stop_price"], entry + buffer, candidate)
+    else:
+        position["stop_price"] = min(position["stop_price"], entry - buffer, candidate)
 
 
 def exit_event(position: dict, strategy: Strategy, bar, config: LabConfig, symbol: str = "BTCUSDT"):
@@ -248,6 +318,7 @@ def summarize(trades: list[dict], curve: list[dict], position: dict | None,
         previous = equity
     equity = curve[-1]["equity"] if curve else balance
     return dict(closed_trades=len(trades), wins=len(wins), losses=len(losses),
+                liquidations=sum(trade["status"] == "LIQUIDATION" for trade in trades),
                 win_rate=len(wins) / len(trades) * 100 if trades else None,
                 net_pnl=sum(pnls), equity=equity, balance=balance,
                 total_return_pct=(equity / config.initial_equity - 1) * 100,
@@ -282,6 +353,8 @@ def replay(frame: pd.DataFrame, strategy: Strategy, config: LabConfig,
         if position is not None:
             position["candles_held"] += 1
             event = exit_event(position, strategy, bar, config, symbol)
+            if event is None:
+                advance_stop(position, strategy, bar, config)
             if event is None and stop and index == len(rows) - 1:
                 event = ("STOPPED" if live_start is not None else "SAMPLE_END", float(bar.close), bar.close_time, False)
             if event:

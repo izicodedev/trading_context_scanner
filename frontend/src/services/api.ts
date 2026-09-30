@@ -137,7 +137,7 @@ export interface CustomStrategyInput {
 export interface SimulationCatalog { strategies: LabStrategy[]; selected_keys: string[] }
 export const getSimulationCatalog = (symbol: MarketSymbol = 'BTCUSDT') => getJson<SimulationCatalog>(`/simulator/strategies?symbol=${symbol}`);
 export const createSimulationStrategy = (strategy: CustomStrategyInput) => postJson<LabStrategy>('/simulator/strategies', strategy);
-export const saveSimulationSelection = (strategy_keys: string[], symbol: MarketSymbol = 'BTCUSDT') => postJson<{ selected_keys: string[] }>('/simulator/selection', { strategy_keys, symbol });
+export const saveSimulationSelection = (strategy_keys: string[], symbol: MarketSymbol = 'BTCUSDT') => postJson<{ selected_keys: string[], applied: boolean, warning?: string }>('/simulator/selection', { strategy_keys, symbol });
 export interface LabTrade {
   side: string; entry_time: string; entry_price: number; stop_price: number;
   target_price: number; margin: number; quantity: number; candles_held: number;

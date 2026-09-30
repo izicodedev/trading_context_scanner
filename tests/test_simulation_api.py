@@ -50,11 +50,34 @@ def test_custom_strategy_endpoints_are_user_scoped(client, monkeypatch):
         return keys
     monkeypatch.setattr(simulation_api.user_strategies, "create", create)
     monkeypatch.setattr(simulation_api.user_strategies, "choose", choose)
+    monkeypatch.setattr(simulation_api.lab_service, "start", lambda user_id, symbol, refresh_active: seen.append(("apply", user_id, symbol, refresh_active)) or True)
     assert client.get("/api/simulator/strategies").get_json()["selected_keys"] == []
     assert client.post("/api/simulator/strategies", json={"name": "Minha regra"}).status_code == 201
-    assert client.post("/api/simulator/selection", json={"strategy_keys": ["custom_123"]}).get_json()["selected_keys"] == ["custom_123"]
-    assert seen == [(1, "Minha regra"), (1, ["custom_123"], "BTCUSDT")]
+    saved = client.post("/api/simulator/selection", json={"strategy_keys": ["custom_123"]}).get_json()
+    assert saved == {"selected_keys": ["custom_123"], "applied": True}
+    assert seen == [(1, "Minha regra"), (1, ["custom_123"], "BTCUSDT"), ("apply", 1, "BTCUSDT", True)]
     assert client.post("/api/simulator/selection", json={"bad": 1}).status_code == 400
+
+
+def test_selection_waits_for_activation_when_simulation_is_stopped(client, monkeypatch):
+    monkeypatch.setattr(simulation_api.user_strategies, "choose", lambda user_id, keys, symbol: keys)
+    monkeypatch.setattr(simulation_api.lab_service, "start", lambda user_id, symbol, refresh_active: False)
+    response = client.post("/api/simulator/selection", json={
+        "strategy_keys": ["breakout_retest_0"], "symbol": "ETHUSDT"})
+    assert response.status_code == 200
+    assert response.get_json() == {"selected_keys": ["breakout_retest_0"], "applied": False}
+
+
+def test_selection_reports_saved_but_not_applied_when_history_is_invalid(client, monkeypatch):
+    monkeypatch.setattr(simulation_api.user_strategies, "choose", lambda user_id, keys, symbol: keys)
+    def invalid_history(user_id, symbol, refresh_active):
+        raise ValueError("Histórico 5m com lacunas")
+    monkeypatch.setattr(simulation_api.lab_service, "start", invalid_history)
+    response = client.post("/api/simulator/selection", json={"strategy_keys": ["breakout_retest_0"]})
+    assert response.status_code == 200
+    assert response.get_json()["selected_keys"] == ["breakout_retest_0"]
+    assert response.get_json()["applied"] is False
+    assert "Histórico 5m com lacunas" in response.get_json()["warning"]
 
 
 def test_simulation_serializes_result(client):

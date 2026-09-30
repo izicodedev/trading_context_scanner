@@ -50,7 +50,12 @@ def select_simulation_strategies():
             raise ValueError("Envie a lista de estratégias selecionadas.")
         symbol = validate_symbol(payload.get("symbol", DEFAULT_SYMBOL))
         keys = user_strategies.choose(session["user_id"], payload["strategy_keys"], symbol)
-        return jsonify(selected_keys=keys)
+        try:
+            applied = lab_service.start(session["user_id"], symbol, refresh_active=True)
+        except ValueError as exc:
+            return jsonify(selected_keys=keys, applied=False,
+                           warning=f"Seleção salva, mas não foi aplicada à sessão: {exc}")
+        return jsonify(selected_keys=keys, applied=applied)
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
     except (psycopg.Error, RuntimeError):

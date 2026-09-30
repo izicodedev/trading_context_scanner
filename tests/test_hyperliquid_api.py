@@ -121,6 +121,7 @@ def test_strategy_selection_requires_connection_and_valid_key(client, monkeypatc
     fake_database(monkeypatch, None)
     assert client.post('/api/hyperliquid/strategy', json={'strategy_key': 'channel_follow_15'}).status_code == 409
     assert client.post('/api/hyperliquid/strategy', json={'strategy_key': 'invented'}).status_code == 400
+    assert client.post('/api/hyperliquid/strategy', json={'strategy_key': 'swing_breakout_0'}).status_code == 400
     assert client.post('/api/hyperliquid/strategy', json={'strategy_key': []}).status_code == 400
 
 

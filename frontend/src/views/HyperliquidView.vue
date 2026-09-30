@@ -39,6 +39,7 @@ const defaultStrategy = computed(() => {
     ? item.qualified : item.validation != null && item.validation > 0)
 })
 const preview = computed(() => strategyConfig.value?.strategies.find(item => item.key === strategyKey.value))
+const savedTrial = computed(() => research.value?.research?.trials?.find(item => item.strategy.key === strategyConfig.value?.selected?.key))
 const performanceLabel = (item: typeof rankedStrategies.value[number]) => item.validation != null
   ? `${pct(item.validation)} no segundo período${item.qualified ? ' · apta na triagem' : ' · não aprovada'}`
   : item.discovery != null ? `${pct(item.discovery)} descoberta · sem triagem` : 'Sem resultado'
@@ -128,7 +129,8 @@ watch(() => props.symbol, async symbol => {
       <p v-if="props.symbol !== 'BTCUSDT'" class="note">Pesquisa histórica de {{ props.symbol }}. O executor real atual opera somente BTC; trocar a moeda exibida não muda uma sessão em andamento nem ativa ordens em ETH.</p>
       <p v-if="props.symbol !== 'BTCUSDT' && research" class="note">{{ research.research?.eligible_count === 0 ? 'Nenhuma hipótese aprovada na triagem histórica desta moeda.' : rankedStrategies.filter(item => item.qualified).slice(0, 3).map(item => `${strategyName(item.strategy)} · ${performanceLabel(item)}`).join(' | ') || 'Nenhum resultado de triagem disponível para esta moeda.' }}</p>
       <p v-if="strategyConfig?.selected && props.symbol === 'BTCUSDT'" class="selected-name">{{ strategyName(strategyConfig.selected) }}</p>
-      <p v-else-if="props.symbol === 'BTCUSDT'" class="muted">Nenhuma estratégia salva.</p>
+      <p v-if="props.symbol === 'BTCUSDT' && savedTrial?.qualified === false" class="alert">A estratégia salva não passou na triagem histórica exibida. Revise os resultados antes de manter novas entradas reais.</p>
+      <p v-if="props.symbol === 'BTCUSDT' && !strategyConfig?.selected" class="muted">Nenhuma estratégia salva.</p>
       <form v-if="props.symbol === 'BTCUSDT'" class="strategy-form" @submit.prevent="selectStrategy">
         <label>Alterar estratégia<select v-model="strategyKey" :disabled="strategyBusy || !strategyConfig"><option disabled value="">Selecione uma configuração</option><option v-for="item in rankedStrategies" :key="item.strategy.key" :value="item.strategy.key">{{ strategyName(item.strategy) }} · {{ performanceLabel(item) }}</option></select></label>
         <button type="submit" :disabled="strategyBusy || !savedAddress || !strategyConfig || !strategyKey || strategyConfig?.selected?.key === strategyKey">{{ strategyBusy ? 'Salvando…' : 'Salvar escolha' }}</button>

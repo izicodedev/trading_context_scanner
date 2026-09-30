@@ -68,9 +68,12 @@ const live = (key: string) => state.value?.snapshot?.live.find(item => item.stra
 const training = (key: string) => state.value?.snapshot?.research?.training.find(item => item.strategy.key === key)
 const validation = (key: string) => state.value?.snapshot?.research?.validation.find(item => item.strategy.key === key)
 const testedStrategies = computed(() => state.value?.snapshot?.research?.trials ?? [])
+const paperOnly = (key: string) => /^(trend_retest|compression_breakout|band_reentry|swing_breakout|breakout_retest)_/.test(key)
 const selectionChanged = computed(() => JSON.stringify([...selectedKeys.value].sort()) !== JSON.stringify([...savedKeys.value].sort()))
+const sessionSelectionChanged = computed(() => Boolean(state.value?.active && state.value.snapshot)
+  && JSON.stringify([...selectedKeys.value].sort()) !== JSON.stringify([...sessionKeys.value].sort()))
 function syncAutomaticSelection() {
-  if (!catalogLoaded.value || !automaticSelection.value || selectionChanged.value || !state.value?.snapshot) return
+  if (!catalogLoaded.value || !automaticSelection.value || selectionChanged.value || !state.value?.active || !state.value.snapshot) return
   selectedKeys.value = [...sessionKeys.value]
   savedKeys.value = [...sessionKeys.value]
 }
@@ -109,12 +112,22 @@ async function saveSelection() {
   if (catalogBusy.value) return false
   catalogBusy.value = true; catalogError.value = ''
   try {
-    const data = await saveSimulationSelection(selectedKeys.value, props.symbol)
+    const symbol = props.symbol
+    const data = await saveSimulationSelection(selectedKeys.value, symbol)
+    if (symbol !== props.symbol) return false
     automaticSelection.value = !data.selected_keys.length
     selectedKeys.value = [...data.selected_keys]
     savedKeys.value = [...data.selected_keys]
-    syncAutomaticSelection()
-    notice.value = automaticSelection.value ? 'Seleção automática restaurada para a próxima sessão.' : 'Seleção salva para a próxima sessão.'
+    if (data.applied) {
+      const current = ++revision
+      try {
+        const updated = await getLiveSimulation(symbol)
+        if (current === revision && symbol === props.symbol) { state.value = updated; syncAutomaticSelection() }
+      } catch { /* The existing poll will retry; the selection was already applied. */ }
+    }
+    notice.value = data.warning || (data.applied
+      ? 'Seleção aplicada. Uma nova sessão de simulação começou; a anterior foi arquivada.'
+      : 'Seleção salva. Clique em Ativar simulação para mostrá-la no quadro acima.')
     return true
   } catch (reason) { catalogError.value = reason instanceof Error ? reason.message : 'Não foi possível salvar a seleção.'; return false }
   finally { catalogBusy.value = false }
@@ -236,11 +249,11 @@ onBeforeUnmount(() => { if (polling) window.clearInterval(polling); revision++ }
       <p>{{ state.snapshot?.research?.selection_message || 'Ative a simulação para avaliar o histórico e acompanhar juntas as estratégias selecionadas.' }}</p>
     </section>
     <details class="sim-picker" aria-label="Escolher estratégias para simular" open>
-      <summary class="sim-picker-head"><div><h3>Escolher estratégias</h3><p>{{ automaticSelection ? 'A seleção automática usa até três hipóteses lucrativas nos dois períodos históricos, ordenadas pelo acerto no segundo.' : 'Seleção salva para a próxima sessão. A sessão atual mantém as regras com que começou.' }}</p></div><span>{{ selectedKeys.length }}/12 selecionadas</span></summary>
-      <div class="sim-picker-actions"><input v-model="catalogSearch" type="search" placeholder="Buscar por nome ou regra" aria-label="Buscar estratégias" /><button class="sim-secondary" type="button" :disabled="catalogBusy || !selectionChanged" @click="saveSelection">{{ catalogBusy ? 'Salvando…' : 'Salvar seleção' }}</button></div>
+      <summary class="sim-picker-head"><div><h3>Escolher estratégias</h3><p>{{ automaticSelection ? 'A seleção automática usa até três hipóteses lucrativas nos dois períodos históricos, ordenadas pelo acerto no segundo.' : state?.active ? 'Ao salvar, começa uma nova sessão com as estratégias marcadas; a sessão anterior é arquivada.' : 'Seleção salva. Clique em Ativar simulação para começar a acompanhar as estratégias marcadas.' }}</p></div><span>{{ selectedKeys.length }}/12 selecionadas</span></summary>
+      <div class="sim-picker-actions"><input v-model="catalogSearch" type="search" placeholder="Buscar por nome ou regra" aria-label="Buscar estratégias" /><button class="sim-secondary" type="button" :disabled="catalogBusy || (!selectionChanged && !sessionSelectionChanged)" @click="saveSelection">{{ catalogBusy ? 'Aplicando…' : sessionSelectionChanged && !selectionChanged ? 'Aplicar à sessão' : 'Salvar seleção' }}</button></div>
       <p v-if="automaticSelection && !sessionKeys.length" class="sim-muted">Se nenhuma hipótese cumprir os critérios, a simulação não inicia automaticamente. Você ainda pode selecionar uma hipótese experimental.</p>
       <div class="sim-picker-list">
-        <label v-for="strategy in visibleCatalog" :key="strategy.key" class="sim-picker-item"><input type="checkbox" :checked="selectedKeys.includes(strategy.key)" :disabled="!selectedKeys.includes(strategy.key) && selectedKeys.length >= 12" @change="toggleKey(strategy.key)" /><span><strong>{{ strategyName(strategy) }}</strong><small>{{ sessionKeys.includes(strategy.key) && state?.active ? 'Em simulação · ' : '' }}{{ strategy.entry_rule ? 'Criada por você' : 'Catálogo' }} · {{ strategy.leverage }}×<template v-if="trial(strategy.key)?.qualified != null"> · {{ trial(strategy.key)?.qualified ? 'apta na triagem' : 'não aprovada' }} · retorno {{ percent(trial(strategy.key)?.validation_return) }} no segundo período · {{ percent(trial(strategy.key)?.validation_win_rate) }} acerto</template><template v-else-if="validation(strategy.key)"> · pesquisa anterior · validação {{ percent(validation(strategy.key)?.total_return_pct) }} retorno · {{ percent(validation(strategy.key)?.win_rate) }} acerto</template><template v-else-if="trial(strategy.key)"> · pesquisa anterior · descoberta {{ percent(trialReturn(strategy.key)) }} retorno</template></small></span></label>
+        <label v-for="strategy in visibleCatalog" :key="strategy.key" class="sim-picker-item"><input type="checkbox" :checked="selectedKeys.includes(strategy.key)" :disabled="!selectedKeys.includes(strategy.key) && selectedKeys.length >= 12" @change="toggleKey(strategy.key)" /><span><strong>{{ strategyName(strategy) }}</strong><small>{{ sessionKeys.includes(strategy.key) && state?.active ? 'Em simulação · ' : selectedKeys.includes(strategy.key) && state?.active ? 'Aguardando aplicar · ' : '' }}{{ strategy.entry_rule ? 'Criada por você' : paperOnly(strategy.key) ? 'Em pesquisa · sem execução real' : 'Catálogo' }} · {{ strategy.leverage }}×<template v-if="trial(strategy.key)?.qualified != null"> · {{ trial(strategy.key)?.qualified ? 'apta na triagem' : 'não aprovada' }} · retorno {{ percent(trial(strategy.key)?.validation_return) }} no segundo período · {{ percent(trial(strategy.key)?.validation_win_rate) }} acerto</template><template v-else-if="validation(strategy.key)"> · pesquisa anterior · validação {{ percent(validation(strategy.key)?.total_return_pct) }} retorno · {{ percent(validation(strategy.key)?.win_rate) }} acerto</template><template v-else-if="trial(strategy.key)"> · pesquisa anterior · descoberta {{ percent(trialReturn(strategy.key)) }} retorno</template></small></span></label>
         <p v-if="!catalog.length" class="sim-muted">Carregando catálogo…</p><p v-else-if="!visibleCatalog.length" class="sim-muted">Nenhuma estratégia encontrada.</p>
       </div>
       <p v-if="catalogError" class="sim-error" role="alert">{{ catalogError }}</p><p v-if="notice" class="sim-muted" role="status">{{ notice }}</p>
@@ -290,7 +303,7 @@ onBeforeUnmount(() => { if (polling) window.clearInterval(polling); revision++ }
         <div class="sim-detail-body">
           <p v-if="state.snapshot?.research">Descoberta: {{ date(state.snapshot.research.discovery_start) }} a {{ date(state.snapshot.research.discovery_end) }}.<br />Validação: {{ date(state.snapshot.research.validation_start) }} a {{ date(state.snapshot.research.validation_end) }}.</p>
           <p v-if="state.snapshot?.research?.excluded_recent_candles" class="sim-muted">Os últimos {{ state.snapshot.research.excluded_recent_candles }} candles, já explorados anteriormente, foram excluídos desta pesquisa histórica.</p>
-          <p>{{ state.snapshot?.research?.selected_manually ? 'As estratégias foram escolhidas pelo usuário antes da sessão.' : state.snapshot?.research?.method }} A validação não escolhe os parâmetros. O acompanhamento ao vivo é o próximo teste.</p>
+          <p>{{ state.snapshot?.research?.selected_manually ? 'As estratégias foram escolhidas pelo usuário antes da sessão.' : state.snapshot?.research?.method }} O segundo período histórico participa da escolha; o acompanhamento em papel é o próximo teste independente.</p>
           <p>{{ state.strategies.length }} bancas independentes. Entrada no candle posterior ao sinal; stop primeiro quando o candle é ambíguo. Não somar retornos como se fossem uma carteira. Custos estimados: {{ number(state.configuration.fee_rate * 100, 3) }}% por execução, {{ number(state.configuration.slippage_rate * 100, 3) }}% de slippage e {{ number(state.configuration.hourly_funding_rate * 100, 5) }}% de funding por hora.</p>
           <p>Binance spot, liquidação aproximada; sem fills ou funding histórico da Hyperliquid. A meta de 5% não é uma previsão. Nenhuma ordem real é enviada.</p>
           <p>Ao parar, posições virtuais encerram no último fechamento. Reativar cria nova sessão; a anterior fica arquivada no banco. Os resultados continuam sendo processados com a página fechada.</p>

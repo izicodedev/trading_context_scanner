@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request, session
 
 from .auth import authenticated_user
 from .candle_storage import _connect
-from .strategy_research import candidates
+from .strategy_research import real_execution_candidates
 from dataclasses import asdict
 from .account_balance import trading_balance
 
@@ -24,7 +24,7 @@ ENDPOINTS = {
 @hyperliquid_api.route('/api/hyperliquid/strategy', methods=['GET', 'POST'])
 @authenticated_user
 def strategy_configuration():
-    catalog = {item.key: asdict(item) for item in candidates()}
+    catalog = {item.key: asdict(item) for item in real_execution_candidates()}
     try:
         with _connect() as conn:
             if request.method == 'POST':

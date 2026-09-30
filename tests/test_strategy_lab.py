@@ -78,6 +78,7 @@ def test_liquidation_gap_is_not_a_profitable_target(monkeypatch):
     monkeypatch.setattr(lab, "decision", lambda *args: "LONG")
     result = lab.replay(frame, lab.STRATEGIES[2], lab.LabConfig())
     assert result["recent_trades"][0]["status"] == "LIQUIDATION"
+    assert result["liquidations"] == 1
     assert result["net_pnl"] < 0
 
 
@@ -98,3 +99,50 @@ def test_direction_rules():
     assert lab.decision(lab.STRATEGIES[2], prev, bar) == "LONG"
     bar.vol_ratio = .5
     assert lab.decision(lab.STRATEGIES[1], prev, bar) is None
+
+
+def test_breakout_retest_waits_for_retest_confirmation():
+    from types import SimpleNamespace
+    strategy = lab.Strategy("breakout_retest_0", "Rompimento com reteste", 5,
+                            .008, 1.5, 3, 144, "")
+    previous = SimpleNamespace(close=101, hh48=100, ll48=90, vol_ratio=1.3)
+    current = SimpleNamespace(open=100.1, close=100.5, low=99.8, high=100.8,
+                              vol_ratio=.8, ema50=99, ema200=98, ema200_24=97)
+    assert lab.decision(strategy, previous, current) == "LONG"
+    current.low = 100.1
+    assert lab.decision(strategy, previous, current) is None
+
+
+def test_breakout_retest_trailing_stop_moves_only_after_one_r_close():
+    from types import SimpleNamespace
+    strategy = lab.Strategy("breakout_retest_0", "Rompimento com reteste", 5,
+                            .008, 1.5, 3, 144, "")
+    position = dict(side="LONG", entry_price=100., initial_risk=2., stop_price=98.)
+    lab.advance_stop(position, strategy, SimpleNamespace(close=101.9, atr=1.), lab.LabConfig())
+    assert position["stop_price"] == 98.
+    lab.advance_stop(position, strategy, SimpleNamespace(close=102.1, atr=1.), lab.LabConfig())
+    assert position["stop_price"] > 100.
+    lab.advance_stop(position, strategy, SimpleNamespace(close=103., atr=.5), lab.LabConfig())
+    assert position["stop_price"] == 102.
+
+
+def test_trailing_stop_is_not_filled_before_its_candle_closes(monkeypatch):
+    frame = candles(63)
+    frame.loc[61, ["open", "high", "low", "close"]] = [100, 101.1, 99.5, 101]
+    frame.loc[62, ["open", "high", "low", "close"]] = [100.9, 101, 99.5, 100]
+    strategy = lab.Strategy("breakout_retest_0", "Rompimento com reteste", 5,
+                            .008, 1.5, 3, 144, "")
+    monkeypatch.setattr(lab, "decision", lambda *args: "LONG")
+    result = lab.replay(frame, strategy, lab.LabConfig())
+    assert result["closed_trades"] == 1
+    trade = result["recent_trades"][0]
+    assert trade["candles_held"] == 3
+    assert trade["status"] == "STOP"
+    assert trade["stop_price"] > trade["entry_price"]
+
+
+def test_full_margin_forty_times_costs_before_price_movement():
+    position = dict(side="LONG", quantity=40, entry_price=100, margin=100,
+                    entry_time="2026-01-01T00:00:00Z")
+    result = lab.settlement(position, 100, pd.Timestamp("2026-01-01T00:05:00Z"), lab.LabConfig())
+    assert result["return_on_margin_pct"] == pytest.approx(-5.2)

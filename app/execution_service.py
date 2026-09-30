@@ -5,7 +5,7 @@ import time
 from dataclasses import asdict
 from psycopg.types.json import Jsonb
 from .candle_storage import _connect
-from .strategy_research import candidates
+from .strategy_research import real_execution_candidates
 from .execution_engine import step, prepare_emergency_close, ExecutionBlocked, EntryStopped
 from .hyperliquid_setup import validate_limits
 
@@ -29,7 +29,7 @@ def activate(user_id):
             raise ExecutionBlocked('Cadastre carteira de API e limites primeiro.')
         if not enabled(row['network']):
             raise ExecutionBlocked('Execução nesta rede ainda não liberada no servidor. Falta validação operacional em testnet.')
-        strategy = next((s for s in candidates() if s.key == row['strategy_key']), None)
+        strategy = next((s for s in real_execution_candidates() if s.key == row['strategy_key']), None)
         if strategy is None:
             raise ExecutionBlocked('Selecione uma estratégia.')
         config = dict(user_id=user_id, network=row['network'], account_address=row['account_address'], agent_address=row['agent_address'],

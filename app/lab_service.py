@@ -44,15 +44,18 @@ def status(user_id, symbol=DEFAULT_SYMBOL):
     return row
 
 
-def start(user_id, symbol=DEFAULT_SYMBOL):
+def start(user_id, symbol=DEFAULT_SYMBOL, *, refresh_active=False):
     validate_symbol(symbol)
     config = LabConfig()
     with _connect() as conn:
         # Also serializes concurrent starts when a session row doesn't yet exist.
         conn.execute("SELECT id FROM users WHERE id=%s FOR UPDATE", (user_id,))
         existing = conn.execute("SELECT active FROM strategy_sessions WHERE user_id=%s AND symbol=%s FOR UPDATE", (user_id, symbol)).fetchone()
-        if existing and existing["active"]:
-            return
+        if refresh_active:
+            if not existing or not existing["active"]:
+                return False
+        elif existing and existing["active"]:
+            return False
         frame = _history(conn, symbol=symbol)
         selected, research = select_strategies(frame, config, symbol)
         chosen = selected_for_session(conn, user_id, symbol)
@@ -104,6 +107,7 @@ def start(user_id, symbol=DEFAULT_SYMBOL):
             (user_id, symbol, active, started.to_pydatetime(), frame.iloc[0].open_time,
              frame.iloc[-1].close_time, frame.iloc[-1].close_time,
              Jsonb(asdict(config)), Jsonb(snapshot)))
+    return True
 
 
 def advance(user_id, stopping=False, symbol=DEFAULT_SYMBOL):
