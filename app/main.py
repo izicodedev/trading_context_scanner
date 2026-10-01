@@ -1,5 +1,5 @@
 from __future__ import annotations
-import asyncio, logging
+import asyncio, logging, os
 import pandas as pd
 from .config import settings
 from .evaluation import evaluate_signal
@@ -36,6 +36,7 @@ async def catch_up_candles(client, symbol: str, timeframe: str):
         if cursor < end_ms:
             await asyncio.sleep(.2)
 
+os.makedirs("logs", exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", handlers=[logging.FileHandler("logs/scanner.log"), logging.StreamHandler()])
 
 async def scan(client, symbol: str = settings.symbol):

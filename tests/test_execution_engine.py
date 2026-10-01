@@ -80,6 +80,21 @@ def test_partial_entry_protected_at_actual_fill_and_state_persisted(signal):
     assert any(s['phase']=='protecting' for s in j.saved)
 
 
+def test_channel_follow_15_expires_after_twelve_hours_of_five_minute_candles(signal):
+    from app.strategy_research import real_execution_candidates
+
+    strategy = next(item for item in real_execution_candidates() if item.key == 'channel_follow_15')
+    c = config()
+    c['strategy'] = asdict(strategy)
+    b, j, state = Broker(), Journal(), {'phase': 'waiting'}
+    now = 2_000_000
+
+    engine.step(b, j, c, state, True, now)
+
+    assert strategy.max_candles == 144
+    assert state['expires_at'] - now == 12 * 60 * 60 * 1000
+
+
 def test_timeout_never_resends(signal):
     b,j,state = Broker(),Journal(),{'phase':'waiting'}
     b.fail='entry'

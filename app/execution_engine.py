@@ -23,23 +23,23 @@ def terminal_status(status):
     return isinstance(status, str) and (status in {'filled', 'canceled', 'rejected', 'scheduledCancel'} or status.endswith(('Canceled', 'Rejected')))
 
 
-def prepare_emergency_close(state, position, now):
-    """Turn a user-requested BTC flatten into the existing reduce-only close flow."""
+def prepare_emergency_close(state, position, now, market='BTC'):
+    """Turn a user-requested flatten into the existing reduce-only close flow."""
     if state.get('phase') not in {'submitting', 'protecting', 'open', 'halted'}:
         raise ExecutionBlocked('Não há posição gerenciada disponível para zeragem imediata.')
     if position is None:
-        raise ExecutionBlocked('Nenhuma posição BTC aberta na Hyperliquid.')
+        raise ExecutionBlocked(f'Nenhuma posição {market} aberta na Hyperliquid.')
     try:
         size = float(position['szi'])
     except (KeyError, TypeError, ValueError) as exc:
-        raise ExecutionBlocked('Posição BTC inválida; confira e zere pela Hyperliquid.') from exc
+        raise ExecutionBlocked(f'Posição {market} inválida; confira e zere pela Hyperliquid.') from exc
     expected = state.get('quantity', state.get('requested_quantity'))
     side = state.get('side')
     if not isinstance(state.get('entry_cloid'), str) or not isinstance(expected, (int, float)) or \
             not math.isfinite(expected) or expected <= 0 or \
             not math.isfinite(size) or size == 0 or side not in {'LONG', 'SHORT'} or \
             size * (1 if side == 'LONG' else -1) <= 0 or abs(size) > expected * (1 + 1e-8):
-        raise ExecutionBlocked('Posição BTC divergente da sessão; confira e zere pela Hyperliquid.')
+        raise ExecutionBlocked(f'Posição {market} divergente da sessão; confira e zere pela Hyperliquid.')
     settle_after = state.get('protection_settle_after', 0)
     if not isinstance(settle_after, (int, float)) or not math.isfinite(settle_after):
         settle_after = 0
@@ -58,7 +58,7 @@ def finish_position(broker, journal, state):
     journal.save(state)
 
 
-def close_remaining(broker, journal, state, position, now):
+def close_remaining(broker, journal, state, position, now, market='BTC'):
     """Reconcile each IOC before submitting another reduce-only order for the residual."""
     pending = state.get('close_pending')
     if pending:
@@ -74,7 +74,7 @@ def close_remaining(broker, journal, state, position, now):
             return
         # Re-read the position AFTER the order status, not the earlier account snapshot.
         positions = broker.get_positions()
-        position = next((p for p in positions if p['coin'] == 'BTC'), None)
+        position = next((p for p in positions if p['coin'] == market), None)
         if ack and ack.get('filled', 0) > 0 and position is not None:
             expected_remaining = max(0, state.get('close_quantity', state['quantity']) - ack['filled'])
             if abs(float(position['szi'])) > expected_remaining + 1e-10:
@@ -115,11 +115,23 @@ def price_round(value, decimals):
     return round(float(f'{value:.5g}'), max(0, 6 - decimals))
 
 
-def size_order(limits, strategy, equity, available, price, decimals, market_leverage):
+def size_order(
+    limits, strategy, equity, available, price, decimals, market_leverage,
+    capital_reserved=None, max_utilization_pct=100, configured_leverage=None,
+):
     if not all(math.isfinite(x) and x > 0 for x in (equity, available, price)):
         raise ExecutionBlocked('Saldo ou preço insuficiente.')
     leverage = min(int(limits['max_leverage']), strategy.leverage, int(market_leverage))
+    if configured_leverage is not None:
+        leverage = min(leverage, int(configured_leverage))
     budget = min(equity, available)
+    if capital_reserved is not None:
+        if not math.isfinite(capital_reserved) or capital_reserved <= 0:
+            raise ExecutionBlocked('Capital reservado do bot precisa ser maior que zero.')
+        budget = min(budget, capital_reserved)
+    if not math.isfinite(max_utilization_pct) or not 0 < max_utilization_pct <= 100:
+        raise ExecutionBlocked('Limite de utilização do bot inválido.')
+    budget *= max_utilization_pct / 100
     if limits['sizing_mode'] == 'fixed':
         budget = min(budget, float(limits['capital_usdc']), float(limits['margin_per_trade_usdc']))
     # Reserve for two taker executions, adverse price movement and rounding.
@@ -166,6 +178,7 @@ def step(broker, journal, config, state, active, now=None):
     now = now or int(time.time() * 1000)
     strategy = Strategy(**config['strategy'])
     limits = config['limits']
+    market = config.get('market', 'BTC')
     # Always reconcile before new signals, including when entries have been stopped.
     phase = state.get('phase', 'waiting')
     if phase == 'halted':
@@ -176,7 +189,7 @@ def step(broker, journal, config, state, active, now=None):
         positions, orders, equity, available = broker.account(management=phase == 'open')
     if phase == 'waiting':
         state.update(balance_source=getattr(broker, 'balance_source', 'perps_usdc'), equity=equity, available_margin=available)
-    position = next((p for p in positions if p['coin'] == 'BTC'), None)
+    position = next((p for p in positions if p['coin'] == market), None)
     if phase == 'submitting':
         state['pause_entries'] = True
         evidence = broker.entry_evidence(state['entry_cloid'], state.get('submitted_ms', config['started_ms']))
@@ -196,16 +209,16 @@ def step(broker, journal, config, state, active, now=None):
         state.update(phase='closing', quantity=evidence['quantity'], message='Preenchimento recuperado após falha; zerando exposição confirmada.')
         journal.save(state)
         positions = broker.get_positions()
-        position = next((p for p in positions if p['coin'] == 'BTC'), None)
-        close_remaining(broker, journal, state, position, now)
+        position = next((p for p in positions if p['coin'] == market), None)
+        close_remaining(broker, journal, state, position, now, market)
         return state
     if phase == 'protecting':
         state.update(phase='closing', pause_entries=True, message='Proteção interrompida; zerando exposição confirmada.')
         journal.save(state)
-        close_remaining(broker, journal, state, position, now)
+        close_remaining(broker, journal, state, position, now, market)
         return state
     if phase == 'closing':
-        close_remaining(broker, journal, state, position, now)
+        close_remaining(broker, journal, state, position, now, market)
         return state
     if phase == 'open':
         if position is None:
@@ -223,7 +236,7 @@ def step(broker, journal, config, state, active, now=None):
         if missing or now >= state['expires_at']:
             state.update(phase='closing', message='Fechamento por proteção ausente ou prazo máximo.')
             journal.save(state)
-            close_remaining(broker, journal, state, position, now)
+            close_remaining(broker, journal, state, position, now, market)
         return state
     if not active or state.get('pause_entries'):
         state.update(message='Novas entradas paradas.')
@@ -255,7 +268,12 @@ def step(broker, journal, config, state, active, now=None):
     if not side:
         return state
     price, decimals, max_leverage = broker.market()
-    qty, leverage = size_order(limits, strategy, equity, available, price, decimals, max_leverage)
+    qty, leverage = size_order(
+        limits, strategy, equity, available, price, decimals, max_leverage,
+        capital_reserved=config.get('capital_reserved'),
+        max_utilization_pct=config.get('max_utilization_pct', 100),
+        configured_leverage=config.get('configured_leverage'),
+    )
     distance = max(strategy.stop_floor * price, atr * strategy.atr_multiple)
     if not math.isfinite(distance) or distance <= 0 or distance / price >= .8 / leverage:
         raise ExecutionBlocked('Stop incompatível com a alavancagem configurada.')
@@ -320,8 +338,8 @@ def step(broker, journal, config, state, active, now=None):
             state.update(phase='closing', pause_entries=True, message='Proteção rejeitada; tentando zerar a posição.')
             journal.save(state)
             positions = broker.get_positions()
-            position = next((p for p in positions if p['coin'] == 'BTC'), None)
-            close_remaining(broker, journal, state, position, now)
+            position = next((p for p in positions if p['coin'] == market), None)
+            close_remaining(broker, journal, state, position, now, market)
             return state
         journal.save(state)
     state.update(phase='open', message='Posição aberta com stop e alvo na Hyperliquid.')
