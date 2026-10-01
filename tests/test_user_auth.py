@@ -250,6 +250,27 @@ def test_user_migrations_are_applied_once(monkeypatch):
     assert sum("CREATE TABLE IF NOT EXISTS hyperliquid_connections" in sql for sql in connection.statements) == 1
 
 
+def test_legacy_bot_import_requires_a_distinct_confirmed_subaccount():
+    migration = (
+        Path(__file__).resolve().parent.parent
+        / "migrations"
+        / "017_import_active_legacy_hyperliquid_bot.sql"
+    ).read_text(encoding="utf-8").lower()
+
+    assert "connection.account_address" in migration
+    assert "wallet_address" in migration
+    assert "lower(connection.account_address) <> lower(run.account_address)" in migration
+    assert "lower(run.configuration->>'master_address') = lower(connection.account_address)" in migration
+    assert "lower(connection.legacy_subaccount_address) = lower(run.account_address)" in migration
+    assert "run.bot_id is null" in migration
+    assert "set bot_id = bot.id" in migration
+    assert "set active" not in migration
+    assert "set managing" not in migration
+    assert "set state" not in migration
+    assert "agent_address" not in migration
+    assert "encrypted_key" not in migration
+
+
 def test_auth_requires_a_configured_session_secret(monkeypatch):
     previous_secret = app.secret_key
     monkeypatch.setattr(auth, "get_database_url", lambda: "postgresql://test")

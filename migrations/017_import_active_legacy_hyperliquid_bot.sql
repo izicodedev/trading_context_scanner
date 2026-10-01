@@ -7,6 +7,7 @@ INSERT INTO hyperliquid_bots (
     master_address,
     wallet_address,
     account_address,
+    subaccount,
     strategy_key,
     strategy_name,
     strategy_config,
@@ -25,15 +26,10 @@ SELECT
     'BTC',
     'BTC',
     run.network,
-    NULLIF(lower(COALESCE(
-        run.configuration->>'master_address',
-        run.configuration->>'wallet_address'
-    )), ''),
-    COALESCE(
-        NULLIF(lower(run.configuration->>'wallet_address'), ''),
-        NULLIF(lower(run.configuration->>'master_address'), '')
-    ),
-    run.account_address,
+    lower(connection.account_address),
+    lower(connection.account_address),
+    lower(run.account_address),
+    lower(run.account_address),
     run.configuration->'strategy'->>'key',
     run.configuration->'strategy'->>'name',
     COALESCE(run.configuration->'strategy', '{}'::jsonb),
@@ -49,18 +45,40 @@ SELECT
     run.configuration->'limits',
     jsonb_build_object('source', 'legacy_run', 'run_id', run.id)
 FROM hyperliquid_runs AS run
+JOIN hyperliquid_connections AS connection
+  ON connection.user_id = run.user_id
+ AND connection.network = run.network
 WHERE run.id = 7
+  AND run.bot_id IS NULL
+  AND lower(run.configuration->>'account_address') = lower(run.account_address)
+  AND lower(connection.account_address) <> lower(run.account_address)
+  AND (
+      lower(run.configuration->>'master_address') = lower(connection.account_address)
+      OR lower(connection.legacy_subaccount_address) = lower(run.account_address)
+  )
   AND NOT EXISTS (
       SELECT 1
       FROM hyperliquid_bots AS bot
       WHERE bot.network = run.network
-        AND bot.account_address = run.account_address
+        AND bot.account_address = lower(run.account_address)
   );
 
 UPDATE hyperliquid_runs AS run
 SET bot_id = bot.id
 FROM hyperliquid_bots AS bot
+JOIN hyperliquid_connections AS connection
+  ON connection.user_id = bot.user_id
+ AND connection.network = bot.network
 WHERE run.id = 7
+  AND run.bot_id IS NULL
+  AND bot.user_id = run.user_id
   AND bot.network = run.network
-  AND bot.account_address = run.account_address
-  AND run.bot_id IS DISTINCT FROM bot.id;
+  AND bot.account_address = lower(run.account_address)
+  AND bot.master_address = lower(connection.account_address)
+  AND bot.wallet_address = bot.master_address
+  AND lower(run.configuration->>'account_address') = lower(run.account_address)
+  AND lower(connection.account_address) <> lower(run.account_address)
+  AND (
+      lower(run.configuration->>'master_address') = lower(connection.account_address)
+      OR lower(connection.legacy_subaccount_address) = lower(run.account_address)
+  );

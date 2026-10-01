@@ -35,10 +35,11 @@ robôs diferentes, desde que cada robô use sua própria subconta. A migration
 a unicidade do agente. A troca da credencial é bloqueada enquanto a sessão do
 robô ainda estiver em gerenciamento.
 
-A migration 017 importa o run legado 7 como um bot parado e associa somente
-`hyperliquid_runs.bot_id`. Ela não altera estado da execução nem copia ou
-modifica credenciais; exige `master_address` ou `wallet_address` válido na
-configuração do run.
+A migration 017 só importa o run legado 7 se a configuração e a conexão atual
+comprovarem uma subconta distinta da conta principal. Nesse caso, preenche
+`master_address` e `wallet_address` com `hyperliquid_connections.account_address`
+e associa somente `hyperliquid_runs.bot_id`; não copia credenciais. Runs sem
+essa comprovação permanecem legados e não são associados a um bot.
 
 O worker usa candles fechados nativos de BTC/5m; aguarda candle posterior à
 ativação. Uma posição por conta, margem isolada e alavancagem limitada ao menor
