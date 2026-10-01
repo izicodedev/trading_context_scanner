@@ -230,8 +230,6 @@ def build_history_payload(limit: int = 200, symbol: str = DEFAULT_SYMBOL):
 
 def build_components_payload(symbol: str = DEFAULT_SYMBOL):
     rows = load_signal_rows(symbol)
-    if not rows:
-        return []
 
     component_names = [
         "long_trend_ema", "long_price_above_ema", "long_rsi_favorable", "long_rsi_extreme",
@@ -239,8 +237,6 @@ def build_components_payload(symbol: str = DEFAULT_SYMBOL):
         "short_trend_ema", "short_price_below_ema", "short_rsi_favorable", "short_rsi_extreme",
         "short_volume_confirmation", "short_fib", "short_liquidity_sweep", "short_structure",
     ]
-    if not any(f"{name}_active" in row for row in rows for name in component_names):
-        return []
 
     summary = []
     for name in component_names:

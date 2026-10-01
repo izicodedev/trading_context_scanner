@@ -61,16 +61,36 @@ def parse_order(result):
 class Broker:
     def __init__(self, config):
         secret = json.loads(cipher().decrypt(config['encrypted_key'].encode()))
-        if any(secret[key] != config[field] for key, field in [('owner', 'account_address'), ('network', 'network'), ('user_id', 'user_id')]):
+        bot_execution = config.get('bot_id') is not None
+        credential_owner = config.get('master_address') if bot_execution else config['account_address']
+        secret_owner = secret.get('owner')
+        if (
+            not isinstance(credential_owner, str)
+            or not isinstance(secret_owner, str)
+            or secret_owner.lower() != credential_owner.lower()
+            or secret.get('network') != config.get('network')
+            or secret.get('user_id') != config.get('user_id')
+        ):
             raise ExecutionBlocked('Credencial não corresponde à configuração da sessão.')
         wallet = Account.from_key(secret['key'])
         if wallet.address.lower() != config['agent_address']:
             raise ExecutionBlocked('Carteira de API divergente.')
         self.owner = config['account_address']
+        self.credential_owner = credential_owner
+        self.market_name = config.get('market', 'BTC').upper()
+        for suffix in ('-PERP', '/PERP', 'USDT', 'USD'):
+            if self.market_name.endswith(suffix):
+                self.market_name = self.market_name[:-len(suffix)]
+                break
         self.agent = config['agent_address']
         url = 'https://api.hyperliquid.xyz' if config['network'] == 'mainnet' else 'https://api.hyperliquid-testnet.xyz'
         self.url = url
-        self.exchange = Exchange(wallet, url, account_address=self.owner, timeout=10)
+        self.exchange = Exchange(
+            wallet, url,
+            vault_address=self.owner if bot_execution else None,
+            account_address=credential_owner,
+            timeout=10,
+        )
         self.info = self.exchange.info
 
     def check_clock(self):
@@ -90,7 +110,7 @@ class Broker:
 
     def authorized(self):
         now = time.time() * 1000
-        if not any(a['address'].lower() == self.agent and a['validUntil'] > now for a in self.info.extra_agents(self.owner)):
+        if not any(a['address'].lower() == self.agent and a['validUntil'] > now for a in self.info.extra_agents(self.credential_owner)):
             raise ExecutionBlocked('Carteira de API expirada ou revogada.')
 
     def get_positions(self):
@@ -117,23 +137,29 @@ class Broker:
         return self.info.user_fills_by_time(self.owner, since), self.info.user_funding_history(self.owner, since)
 
     def candles(self, now):
-        return self.info.candles_snapshot('BTC', '5m', now - 301 * 300_000, now)
+        return self.info.candles_snapshot(self.market_name, '5m', now - 301 * 300_000, now)
 
     def market(self):
-        asset = next(a for a in self.info.meta()['universe'] if a['name'] == 'BTC')
-        if asset.get('isDelisted'):
-            raise ExecutionBlocked('Mercado BTC indisponível.')
-        return float(self.info.all_mids()['BTC']), asset['szDecimals'], asset['maxLeverage']
+        asset = next((a for a in self.info.meta()['universe'] if a['name'] == self.market_name), None)
+        if asset is None or asset.get('isDelisted'):
+            raise ExecutionBlocked(f'Mercado {self.market_name} indisponível.')
+        mids = self.info.all_mids()
+        mid = mids.get(self.market_name) if isinstance(mids, dict) else None
+        try:
+            price = float(mid)
+        except (TypeError, ValueError):
+            raise ExecutionBlocked(f'Preço do mercado {self.market_name} indisponível.') from None
+        return price, asset['szDecimals'], asset['maxLeverage']
 
     def leverage(self, value):
-        if self.exchange.update_leverage(value, 'BTC', is_cross=False).get('status') != 'ok':
+        if self.exchange.update_leverage(value, self.market_name, is_cross=False).get('status') != 'ok':
             raise ExecutionBlocked('Não foi possível configurar margem isolada.')
 
     def entry(self, cloid, quantity, buy, limit_price):
         self.exchange.set_expires_after(int(time.time() * 1000) + 15000)
         # The caller calculates the IOC limit from the already checked market price.
         # Do not make another /info request after the entry intent is journaled.
-        return parse_order(self.exchange.order('BTC', buy, quantity, limit_price,
+        return parse_order(self.exchange.order(self.market_name, buy, quantity, limit_price,
             {'limit': {'tif': 'Ioc'}}, cloid=Cloid.from_str(cloid)))
 
     def close(self, cloid, quantity, buy):
@@ -142,16 +168,16 @@ class Broker:
         px, decimals, _ = self.market()
         from .execution_engine import price_round
         price = price_round(px * (1.003 if buy else .997), decimals)
-        return parse_order(self.exchange.order('BTC', buy, quantity, price, {'limit': {'tif': 'Ioc'}}, reduce_only=True, cloid=Cloid.from_str(cloid)))
+        return parse_order(self.exchange.order(self.market_name, buy, quantity, price, {'limit': {'tif': 'Ioc'}}, reduce_only=True, cloid=Cloid.from_str(cloid)))
 
     def protect(self, cloid, quantity, buy, trigger, kind):
         self.exchange.set_expires_after(int(time.time() * 1000) + 15000)
-        return parse_order(self.exchange.order('BTC', buy, quantity, trigger,
+        return parse_order(self.exchange.order(self.market_name, buy, quantity, trigger,
             {'trigger': {'triggerPx': trigger, 'isMarket': True, 'tpsl': kind}}, reduce_only=True, cloid=Cloid.from_str(cloid)))
 
     def cancel(self, cloid):
         self.exchange.set_expires_after(int(time.time() * 1000) + 15000)
-        result = self.exchange.cancel_by_cloid('BTC', Cloid.from_str(cloid))
+        result = self.exchange.cancel_by_cloid(self.market_name, Cloid.from_str(cloid))
         if result.get('status') != 'ok':
             raise ExecutionBlocked('Não foi possível cancelar a proteção remanescente.')
         # Verify absence rather than trusting a top-level OK containing an error.
@@ -168,7 +194,7 @@ class Broker:
             return None
         record = result['order']
         order = record['order']
-        if order.get('coin') != 'BTC' or order.get('cloid') != cloid:
+        if order.get('coin') != self.market_name or order.get('cloid') != cloid:
             raise ExecutionBlocked('Identidade da ordem divergente na reconciliação.')
         from .execution_engine import terminal_status
         if not terminal_status(record.get('status')):
@@ -176,7 +202,7 @@ class Broker:
         fills = self.info.user_fills_by_time(self.owner, since)
         if len(fills) >= 2000:
             raise ExecutionBlocked('Histórico truncado; não foi possível confirmar a entrada.')
-        matched = {f['tid']: f for f in fills if f['oid'] == order['oid'] and f['coin'] == 'BTC'}
+        matched = {f['tid']: f for f in fills if f['oid'] == order['oid'] and f['coin'] == self.market_name}
         qty = sum(float(f['sz']) for f in matched.values())
         if record['status'] == 'filled' and qty == 0:
             return None  # Order and fills endpoints can become consistent at different times.

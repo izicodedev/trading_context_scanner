@@ -371,7 +371,7 @@ onBeforeUnmount(() => {
         </nav>
       </div>
       <div class="status-wrap">
-        <label class="market-picker">Moeda
+        <label v-if="!isHyperliquidRoute" class="market-picker">Moeda
           <select :value="selectedSymbol" :disabled="symbolBusy" aria-label="Moeda acompanhada" @change="changeSymbol">
             <option value="BTCUSDT">BTC / USDT</option><option value="ETHUSDT">ETH / USDT</option>
           </select>
@@ -388,7 +388,7 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <HyperliquidView v-if="isHyperliquidRoute" :symbol="selectedSymbol" />
+    <HyperliquidView v-if="isHyperliquidRoute" />
     <SimulatorView v-else-if="isSimulatorRoute" :symbol="selectedSymbol" />
     <main v-else-if="!isLoading" class="content">
       <section class="market-overview panel" aria-label="Contexto atual do mercado">
