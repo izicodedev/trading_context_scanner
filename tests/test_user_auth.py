@@ -243,7 +243,7 @@ def test_user_migrations_are_applied_once(monkeypatch):
     first_run = user_migrations.apply_migrations()
     second_run = user_migrations.apply_migrations()
 
-    assert first_run == ["001_user_foundation.sql", "002_market_candles.sql", "003_strategy_sessions.sql", "004_strategy_session_archive.sql", "005_hyperliquid_connections.sql", "006_hyperliquid_strategy.sql", "007_hyperliquid_credentials.sql", "008_execution.sql", "009_execution_responses.sql", "010_user_simulation_strategies.sql", "011_multi_symbol.sql", "012_hyperliquid_bots.sql", "013_hyperliquid_bot_runtime.sql", "014_hyperliquid_legacy_bot_import.sql", "015_hyperliquid_bot_strategy_names.sql"]
+    assert first_run == ["001_user_foundation.sql", "002_market_candles.sql", "003_strategy_sessions.sql", "004_strategy_session_archive.sql", "005_hyperliquid_connections.sql", "006_hyperliquid_strategy.sql", "007_hyperliquid_credentials.sql", "008_execution.sql", "009_execution_responses.sql", "010_user_simulation_strategies.sql", "011_multi_symbol.sql", "012_hyperliquid_bots.sql", "013_hyperliquid_bot_runtime.sql", "014_hyperliquid_legacy_bot_import.sql", "015_hyperliquid_bot_strategy_names.sql", "016_hyperliquid_bot_credentials.sql", "017_import_active_legacy_hyperliquid_bot.sql"]
     assert second_run == []
     assert sum("CREATE TABLE IF NOT EXISTS users" in sql for sql in connection.statements) == 1
     assert sum("CREATE TABLE IF NOT EXISTS market_candles" in sql for sql in connection.statements) == 1
